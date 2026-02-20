@@ -157,6 +157,8 @@ Below are examples of how to use the API on command line with `curl`.
 
 #### Upload a Video File for Transcription
 
+Replace the `/path/to/your/video.mp4` in curl command below, with actual path of a video file on your machine.
+
   ```bash
   curl -X POST "http://localhost:$port/api/v1/transcriptions" \
     -H "Content-Type: multipart/form-data" \
