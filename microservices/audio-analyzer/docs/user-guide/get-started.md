@@ -1,7 +1,6 @@
 # Get Started
 
-The **Audio Analyzer microservice** enables developers to create speech transcription from
-video files. This section provides step-by-step instructions on how to:
+The **Audio Analyzer microservice** enables developers to create speech transcription from video files. This section provides step-by-step instructions on how to:
 
 - Set up the microservice using a pre-built Docker image for quick deployment.
 - Run predefined tasks to explore its functionality.
@@ -15,8 +14,7 @@ Before you begin, ensure the following:
 - **Docker Installed**: Install Docker. Make sure the `docker` command can be run without
 `sudo`. For installation instructions, see [Get Docker](https://docs.docker.com/get-docker/).
 
-This guide assumes basic familiarity with Docker commands and terminal usage. If you are new
-to Docker, see [Docker Documentation](https://docs.docker.com/) for an introduction.
+This guide assumes basic familiarity with Docker commands and terminal usage. If you are new to Docker, see [Docker Documentation](https://docs.docker.com/) for an introduction.
 
 ## Configurations
 
@@ -63,22 +61,22 @@ There are following **four different options** to setup and run the application.
 
 ### Recommended Setup
 
-- [Use pre-built image for standalone setup](#standalone-setup-in-docker-container) : Application runs containerised using a pre-built image. This setup has no external storage dependency. Storage backend used is `local` and **can not** be overridden.
+1.  [Use pre-built image for standalone setup](#standalone-setup-in-docker-container) : Application runs containerised using a pre-built image. This setup has no external storage dependency. Storage backend used is `local` and **can not** be overridden.
 
 ### Advanced Setup
 
-- [Build and run on host using setup script](./get-started/build-from-source.md#build-and-run-on-host-using-setup-script) : Application is built from source and runs directly on host. No external storage dependency. Storage backend used is `local` and **can not** be overriden.
+2.  [Build and run on host using setup script](./get-started/build-from-source.md#build-and-run-on-host-using-setup-script) : Application is built from source and runs directly on host. No external storage dependency. Storage backend used is `local` and **can not** be overriden.
 
-- [Build and run in container using Docker script](./get-started/build-from-source.md#build-and-run-in-container-using-docker-script) : _(Not Recommended)_ Docker script helps build docker image for the application from the source code and deploy it with **optional Minio dependency**. 
+3.  [Build and run in container using Docker script](./get-started/build-from-source.md#build-and-run-in-container-using-docker-script) : _(Not Recommended)_ Docker script helps build docker image for the application from the source code and deploy it with **optional Minio dependency**. 
     -   Storage backend used here is `minio` but [can be overridden](#overriding-storage-backends) to use `local`. 
     -   In case `minio` storage backend is used, this setup also brings up Minio server container along with application container and configures the integration between both services.
     -   If storage backend is overridden to use `local`, no Minio server containers will be brought up.
 
-- [Build and run on host manually](./get-started/build-from-source.md#build-and-run-on-host-manually) : _(Not Recommended)_ Manually setup pre-requisites and build the application on host.
+4.  [Build and run on host manually](./get-started/build-from-source.md#build-and-run-on-host-manually) : _(Not Recommended)_ Manually setup pre-requisites and build the application on host.
     -   Storage backend used here is `local` but [can be overridden](#overriding-storage-backends) to use `minio`.
     -   If `minio` storage backend is used, Minio server and its integration with the application needs to be setup and configured manually.
 
-> __**NOTE :**__ Audio-Analyzer microservice can be run with Minio as its storage backend. However, this is not a recommended setup and is only meant for advanced users. This setup requires familiarity with using Minio and using un-documented API requests.
+    > __**NOTE :**__ Audio-Analyzer microservice can be run with Minio as its storage backend. However, this is not a recommended setup and is only meant for advanced users. This setup requires familiarity with using Minio and using un-documented API requests.
 
 #### Overriding Storage Backends
 
