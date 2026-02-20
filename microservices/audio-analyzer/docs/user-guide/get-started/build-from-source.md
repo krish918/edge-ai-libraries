@@ -24,8 +24,8 @@ terminal usage. If you are new to these concepts, see:
 
 The following options are provided to build the microservice:
 
-- [Build and run application with required dependencies using Docker Script](#build-and-run-in-container-using-docker-script).
-- [Build and run on host using Setup Script](#build-and-run-on-host-using-setup-script).
+- [Build and run application with required dependencies using **Docker script**](#build-and-run-in-container-using-docker-script).
+- [Build and run on host using **Setup script**](#build-and-run-on-host-using-setup-script).
 
 ### Build and run in container using Docker script
 
@@ -37,7 +37,7 @@ The following options are provided to build the microservice:
     git clone https://github.com/open-edge-platform/edge-ai-libraries.git edge-ai-libraries -b <release-tag>
     ```
 
-2. Default storage backend used in the Docker script based setup is `minio`. We need to set following required environment variables for Minio on shell:
+2. Storage backend used in this setup is `minio`. We need to set following **required environment variables** for Minio on current shell:
 
     ```bash
     # MinIO credentials (required)
@@ -45,7 +45,7 @@ The following options are provided to build the microservice:
     export MINIO_SECRET_KEY=<your-minio-password>
     ```
 
-    > __NOTE :__ To override the default storage backend, see [setup the storage backends](../get-started.md#setup-the-storage-backends).
+    > __NOTE :__ If `minio` storage backend is not required, see [Overriding Storage Backend](../get-started.md#overriding-storage-backends).
 
 3. The Docker setup will build the image if not already present on the machine. We can optionally set a registry URL and tag, if we wish to push this image to any repository. If not set, default image will be built as `audio-analyzer:latest`.
 
@@ -71,17 +71,10 @@ The following options are provided to build the microservice:
     ```bash
     # Set a default model to use, if one is not provided explicitly. Should be one of the ENABLED_WHISPER_MODELS
     export DEFAULT_WHISPER_MODEL=tiny.en
-
-    # Device to use: cpu, gpu, or auto
-    export DEFAULT_DEVICE=cpu
-    export USE_FP16=true
-
-    # Storage backend: minio or local
-    export STORAGE_BACKEND=minio
     export MAX_FILE_SIZE=314572800
     ```
 
-6. Run the setup script to build and bring up production version of application. This also brings up Minio Server container (if default **minio** storage backend is used):
+6. Run the setup script to build and bring up production version of application. This also brings up Minio Server container, if `minio` storage backend is used:
 
     ```bash
     cd edge-ai-libraries/microservices/audio-analyzer
