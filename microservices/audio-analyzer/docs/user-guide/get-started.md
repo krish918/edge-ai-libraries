@@ -33,91 +33,60 @@ The following environment variables can be configured:
 explicitly (default: tiny.en or first model from ENABLED_WHISPER_MODELS list, if tiny.en is
 not available)
 - `GGML_MODEL_DIR`: Directory for downloading GGML models (for CPU inference)
-- `OPENVINO_MODEL_DIR`: Directory for storing OpenVINO optimized models (for GPU inference)
-- `LANGUAGE`: Language code for transcription (default: None, auto-detect)
 - `MAX_FILE_SIZE`: Maximum allowed file size in bytes (default: 100MB)
 - `DEFAULT_DEVICE`: Device to use for transcription - 'cpu', 'gpu', or 'auto' (default: cpu). 
-- `USE_FP16`: Use half-precision (FP16) for GPU inference (default: True)
-- `STORAGE_BACKEND`: Storage backend to use - 'minio' or 'filesystem'.
+- `STORAGE_BACKEND`: Storage backend to use - 'minio' or 'local'.
 
-**MinIO Configuration**
+**MinIO Configuration (Advanced Setup)**
+
+These variables are only required when `minio` storage backend is used.
 
 - `MINIO_ENDPOINT`: MinIO server endpoint (default: `minio:9000` in Docker setup script)
 - `MINIO_ACCESS_KEY`: MinIO access key used as login username
 - `MINIO_SECRET_KEY`: MinIO secret key used as login password
 
-### Setup the Storage backends
+### Storage Backends
 
-The service supports two storage backends for source video files and transcript output:
+The service supports **two storage backends** for getting input video and saving transcription output:
 
-- **MinIO** : Store transcripts in a MinIO bucket. (Default value when Docker setup script is
-used)
-- **Filesystem**: Store transcripts on the local filesystem. The API service will not have any
-external storage dependency. (Default value when application runs in [standalone mode](#standalone-setup-in-docker-container).)
-
-The Docker setup script `setup_docker.sh` has **minio** as default storage backend. You can
-override the default value by setting `STORAGE_BACKEND` environment variable:
-
-For Minio Storage:
-```bash
-export STORAGE_BACKEND=minio
-```
-
-For Local filesystem storage:
-```bash
-export STORAGE_BACKEND=local
-```
-
-On the other hand, the host setup script `setup_host.sh` uses **local** filesystem as the
-only storage backend available.
-
-### MinIO integration
-
-The service supports MinIO object storage integration for:
-
-1. **Video Source**: Fetch videos from a MinIO bucket instead of direct uploads
-2. **Transcript Storage**: Store transcription outputs (SRT/TXT) in a MinIO bucket
-
-#### MinIO Configuration
-
-To use MinIO integration, you need to configure the following environment variables:
-
-```bash
-# MinIO server connection
-export MINIO_ACCESS_KEY=<your-minio-username>
-export MINIO_SECRET_KEY=<your-minio-password>
-```
+1. **Local** : _(Recommended)_ Source videos are uploaded from local filesystem. Final transcripts are also stored on the local filesystem Application will not have any external storage dependency.
+2. **MinIO** : _(Used in Advanced Setup)_ Storage requirements are handled by an externally running Minio Instance. Source videos are picked from a Minio bucket. Transcripts are stored in the same MinIO bucket.
 
 ### Model Selection
 
-Refer to [supported models](./index.md#available-whisper-models) for the list of models that
-can be used for transcription. You can specify which models to enable through the
+Refer to [supported models](./index.md#available-whisper-models) for the list of models that can be used for transcription. You can specify which models to enable through the
 `ENABLED_WHISPER_MODELS` environment variable.
 
 ## Quick Start
 
-User has following different options to setup/build and use the application.
+There are following **four different options** to setup and run the application. 
 
 ### Recommended Setup
 
-- [Use pre-built image for standalone setup](#standalone-setup-in-docker-container).
-Standalone setup has no external dependency. Storage backend used: `local`.
-- [Build and run on host using setup script](./get-started/build-from-source.md#build-and-run-on-host-using-setup-script).
-Storage backend used: `local`
+- [Use pre-built image for standalone setup](#standalone-setup-in-docker-container) : Application runs containerised using a pre-built image. This setup has no external storage dependency. Storage backend used is `local` and **can not** be overridden.
+- [Build and run on host using setup script](./get-started/build-from-source.md#build-and-run-on-host-using-setup-script) : Application is built from source and runs directly on host. No external storage dependency. Storage backend used is `local` and **can not** be overriden.
 
 ### Advanced Setup
 
-> __**NOTE :**__ Audio-Analyzer microservice can also be run with Minio as its storage backend.
-However, this is not a recommended setup and is only meant for advanced users. This setup
-requires familiarity with using Minio and using non-documented API requests.
+> __**NOTE :**__ Audio-Analyzer microservice can also be run with Minio as its storage backend. However, this is not a recommended setup and is only meant for advanced users. This setup requires familiarity with using Minio and using un-documented API requests.
 
-- [Build and run in container using Docker script](./get-started/build-from-source.md#build-and-run-in-container-using-docker-script).
-Docker script helps build images for application and deploy the application with any optional
-dependency. Default storage backend used here is `minio` but can be updated to use `local`
-storage backend. If `minio` storage backend is used, then the script also brings up Minio server
-container along with application container.
-- [Build and run on host manually](#build-and-run-on-host-manually). Default storage backend
-used is `local` but can be configured to use `minio` storage backend.
+- [Build and run in container using Docker script](./get-started/build-from-source.md#build-and-run-in-container-using-docker-script) : _(Not Recommended)_ Docker script helps build docker image for the application from the source code and deploy it with **optional Minio dependency**. 
+    -   Storage backend used here is `minio` but [can be overridden](#overriding-storage-backends) to use `local`. 
+    -   In case `minio` storage backend is used, this setup also brings up Minio server container along with application container and configures the integration between both services.
+    -   If storage backend is overridden to use `local`, no Minio server containers will be brought up.
+- [Build and run on host manually](#build-and-run-on-host-manually) : _(Not Recommended)_ Manually setup pre-requisites and build the application on host.
+    -   Storage backend used here is `local` but [can be overridden](#overriding-storage-backends) to use `minio`.
+    -   If `minio` storage backend is used, Minio server and its integration with the application needs to be setup and configured manually.
+
+#### Overriding Storage Backends
+
+Run this command in current shell with desired new value to change storage backend. This needs to be run before running the setup, otherwise you will need to run the setup again, in order to consider the new value.
+
+```bash
+export STORAGE_BACKEND=<new_value>    # local or minio
+```
+
+> **_NOTE :_** This works only with setup methods which allow overriding storage backend.
 
 ## Standalone Setup in Docker Container
 
@@ -215,11 +184,7 @@ The service uses **pywhispercpp** with the following optimizations for CPU trans
 
 ## Build and run on host manually
 
-> **__NOTE :__** This is an advanced setup and is recommended for development/contribution only.
-As an alternative method to setup on host, please see : [setting up on host using setup script](./get-started/build-from-source.md#setup-and-run-on-host-using-setup-script).
-When setting up on host, the default storage backend would be local filesystem. Please make
-sure `STORAGE_BACKEND` is not overridden to **minio**, unless you want to explicitly use the
-Minio backend.
+> **__NOTE :__** This is an advanced setup and is recommended for development/contribution only. As an alternative method to setup on host, please see : [setting up on host using setup script](./get-started/build-from-source.md#build-and-run-on-host-using-setup-script). When setting up on host manually, **the storage backend used is local filesystem**. Please make sure the value of `STORAGE_BACKEND` environment variable is not overridden to `minio`, unless you want to explicitly use the Minio storage backend.
 
 1. Clone the repository and change directory to the audio-analyzer microservice:
     ```bash
@@ -319,22 +284,6 @@ You can then access the MinIO Console at http://localhost:9001 with these creden
 - **Username**: <MINIO_ACCESS_KEY>
 - **Password**: <MINIO_SECRET_KEY>
 
-### When to use Filesystem vs. MinIO backend
-
-Use **Filesystem** backend when (Default for standalone setup on host):
-
-- Running in a simple, single-node deployment
-- No need for distributed/scalable storage
-- No integration with other services that might need to access transcripts
-- Running in resource-constrained environments
-
-Use **MinIO** backend when (Default for setup using Docker script):
-
-- Running in a containerized/cloud environment
-- Need for scalable, distributed object storage
-- Integration with other services that need to access transcripts
-- Building a clustered/distributed system
-- Need for better data organization and retention policies
 
 ## Supporting Resources
 
