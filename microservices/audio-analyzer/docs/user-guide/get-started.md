@@ -64,19 +64,21 @@ There are following **four different options** to setup and run the application.
 ### Recommended Setup
 
 - [Use pre-built image for standalone setup](#standalone-setup-in-docker-container) : Application runs containerised using a pre-built image. This setup has no external storage dependency. Storage backend used is `local` and **can not** be overridden.
-- [Build and run on host using setup script](./get-started/build-from-source.md#build-and-run-on-host-using-setup-script) : Application is built from source and runs directly on host. No external storage dependency. Storage backend used is `local` and **can not** be overriden.
 
 ### Advanced Setup
 
-> __**NOTE :**__ Audio-Analyzer microservice can also be run with Minio as its storage backend. However, this is not a recommended setup and is only meant for advanced users. This setup requires familiarity with using Minio and using un-documented API requests.
+- [Build and run on host using setup script](./get-started/build-from-source.md#build-and-run-on-host-using-setup-script) : Application is built from source and runs directly on host. No external storage dependency. Storage backend used is `local` and **can not** be overriden.
 
 - [Build and run in container using Docker script](./get-started/build-from-source.md#build-and-run-in-container-using-docker-script) : _(Not Recommended)_ Docker script helps build docker image for the application from the source code and deploy it with **optional Minio dependency**. 
     -   Storage backend used here is `minio` but [can be overridden](#overriding-storage-backends) to use `local`. 
     -   In case `minio` storage backend is used, this setup also brings up Minio server container along with application container and configures the integration between both services.
     -   If storage backend is overridden to use `local`, no Minio server containers will be brought up.
-- [Build and run on host manually](#build-and-run-on-host-manually) : _(Not Recommended)_ Manually setup pre-requisites and build the application on host.
+
+- [Build and run on host manually](./get-started/build-from-source.md#build-and-run-on-host-manually) : _(Not Recommended)_ Manually setup pre-requisites and build the application on host.
     -   Storage backend used here is `local` but [can be overridden](#overriding-storage-backends) to use `minio`.
     -   If `minio` storage backend is used, Minio server and its integration with the application needs to be setup and configured manually.
+
+> __**NOTE :**__ Audio-Analyzer microservice can be run with Minio as its storage backend. However, this is not a recommended setup and is only meant for advanced users. This setup requires familiarity with using Minio and using un-documented API requests.
 
 #### Overriding Storage Backends
 
@@ -172,118 +174,6 @@ directory set by `AUDIO_ANALYZER_DIR` variable. We can check the transcripts as 
   ```bash
   ls $AUDIO_ANALYZER_DIR/transcript
   ```
-
-### Transcription Performance and Optimization on CPU
-
-The service uses **pywhispercpp** with the following optimizations for CPU transcription:
-
-- **Multithreading**: Automatically uses the optimal number of threads based on your CPU cores
-- **Parallel Processing**: Utilizes multiple CPU cores for audio processing
-- **Greedy Decoding**: Faster inference by using greedy decoding instead of beam search
-- **OpenVINO IR Models**: Can download and use OpenVINO IR models for even faster CPU inference
-
-## Build and run on host manually
-
-> **__NOTE :__** This is an advanced setup and is recommended for development/contribution only. As an alternative method to setup on host, please see : [setting up on host using setup script](./get-started/build-from-source.md#build-and-run-on-host-using-setup-script). When setting up on host manually, **the storage backend used is local filesystem**. Please make sure the value of `STORAGE_BACKEND` environment variable is not overridden to `minio`, unless you want to explicitly use the Minio storage backend.
-
-1. Clone the repository and change directory to the audio-analyzer microservice:
-    ```bash
-    # Clone the latest on mainline
-    git clone https://github.com/open-edge-platform/edge-ai-libraries.git edge-ai-libraries
-    # Alternatively, Clone a specific release branch
-    git clone https://github.com/open-edge-platform/edge-ai-libraries.git edge-ai-libraries -b <release-tag>
-    # Access the code
-    cd edge-ai-libraries/microservices/audio-analyzer
-    ```
-
-2. Install Poetry if not already installed.
-    ```bash
-    pip install poetry==1.8.3
-    ```
-
-3. Configure poetry to create a local virtual environment.
-    ```bash
-    poetry config virtualenvs.create true
-    poetry config virtualenvs.in-project true
-    ```
-
-4. Install dependencies:
-    ```bash
-    poetry lock --no-update
-    poetry install
-    ```
-
-5. Set comma-separated list of whisper models that need to be enabled:
-    ```bash
-    export ENABLED_WHISPER_MODELS=small.en,tiny.en,medium.en
-    ```
-
-6. Set directories on host where models will be downloaded:
-    ```bash
-    export GGML_MODEL_DIR=/tmp/audio_analyzer_model/ggml
-    export OPENVINO_MODEL_DIR=/tmp/audio_analyzer_model/openvino
-    ```
-
-7. Run the service:
-    ```bash
-    DEBUG=True poetry run uvicorn audio_analyzer.main:app --host 0.0.0.0 --port 8000 --reload
-    ```
-
-8. _(Optional):_ To run the service with Minio storage backend, make sure Minio Server is running. Please see [Running a Local Minio Server](#manually-running-a-local-minio-server). User might need to update the `MINIO_ENDPOINT` environment variable depending on where the Minio Server is running (if not set, default value considered is `localhost:9000`).
-
-    ```bash
-    export MINIO_ENDPOINT="<minio_host>:<minio_port>"
-    ```
-    Run the Audio Analyzer application on host:
-    ```bash
-    STORAGE_BACKEND=minio DEBUG=True poetry run uvicorn audio_analyzer.main:app --host 0.0.0.0 --port 8000 --reload
-    ```
-
-### Running tests for host setup
-
-We can run unit tests and generate coverage by running following command in the application's directory (microservices/audio-analyzer) in the cloned repo:
-
-```bash
-poetry lock --no-update
-poetry install --with dev
-# set a required env var to set model name : required due to compliance issue
-export ENABLED_WHISPER_MODELS=tiny.en
-
-# Run tests
-poetry run coverage run -m pytest ./tests
-
-# Generate Coverage report
-poetry run coverage report -m
-```
-
-### API Documentation
-
-When running the service, you can access the Swagger UI documentation at:
-
-```bash
-http://localhost:8000/docs
-```
-
-## More Advanced Setup Options
-
-### Manually Running a Local MinIO Server
-
-If you're not using the bundled Docker Setup script `setup_docker.sh` and still want to use
-the application with Minio storage, you can manually run a local MinIO server using:
-
-```bash
-docker run -d -p 9000:9000 -p 9001:9001 --name minio \
-  -e MINIO_ROOT_USER=${MINIO_ACCESS_KEY} \
-  -e MINIO_ROOT_PASSWORD=${MINIO_SECRET_KEY} \
-  -v minio_data:/data \
-  minio/minio server /data --console-address ':9001'
-```
-
-You can then access the MinIO Console at http://localhost:9001 with these credentials:
-
-- **Username**: <MINIO_ACCESS_KEY>
-- **Password**: <MINIO_SECRET_KEY>
-
 
 ## Supporting Resources
 
