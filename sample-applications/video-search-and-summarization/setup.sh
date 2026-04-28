@@ -2,22 +2,25 @@
 
 # Color codes for terminal output
 RED='\033[0;31m'
+MAGENTA='\033[0;35m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 BLUE='\033[0;34m'
+GRAY='\033[0;90m'
 NC='\033[0m' # No Color
 
-# Setting variables for directories used as volume mounts. Could be required during stopping containers as well.
+# =================== Setup Mount Directories ======================
 export OVMS_CONFIG_DIR=${PWD}/config/ovms_config
 export OV_MODEL_DIR=${PWD}/ov_models
 export CONFIG_DIR=${PWD}/config
-export NGINX_CONFIG=${CONFIG_DIR}/nginx.conf
+export NGINX_CONFIG=${CONFIG_DIR}/nginx/
+export NGINX_TEMPLATE_DIR=/etc/nginx/templates
 export RABBITMQ_CONFIG=${CONFIG_DIR}/rmq.conf
 
-# Function to stop Docker containers
+# =================== Function Definitions =========================
 stop_containers() {
-    echo -e "${YELLOW}Bringing down the Docker containers... ${NC}"
-    docker compose -f docker/compose.base.yaml -f docker/compose.summary.yaml -f docker/compose.vllm.yaml -f docker/compose.search.yaml -f docker/compose.telemetry.yaml --profile ovms --profile vlm-ov --profile vllm down
+    echo -e "${YELLOW}Bringing down all the Docker containers... ${NC}"
+    docker compose -f docker/compose.base.yaml -f docker/compose.summary.yaml -f docker/compose.vllm.yaml -f docker/compose.search.yaml -f docker/compose.ui.yaml -f docker/compose.telemetry.yaml --profile ovms --profile vlm-ov --profile vllm --profile dual_ui --profile unified_ui down
     if [ $? -ne 0 ]; then
         echo -e "${RED}ERROR: Failed to stop and remove containers.${NC}"
         return 1
@@ -26,111 +29,98 @@ stop_containers() {
     return 0
 }
 
-# Setting command usage and invalid arguments handling before the actual setup starts
+remove_volumes() {
+    echo -e "${YELLOW}Removing Docker volumes... ${NC}"
+    docker volume rm docker_minio_data docker_pg_data docker_vdms-db docker_audio_analyzer_data docker_data-prep docker_collector_signals 2>/dev/null
+    if [ $? -ne 0 ]; then
+        echo -e "${YELLOW}Note: Could not remove all volumes. Some volumes may not have existed, were already removed or currently in use. ${NC}"
+        return 1
+    fi
+    echo -e "${GREEN}All volumes were successfully removed. ${NC}"
+    return 0
+}
+
+# =================== Argument Parsing and Handling =========================
 if [ "$#" -gt 2 ]; then
     echo -e "${RED}ERROR: Too many arguments provided.${NC}"
     echo -e "${YELLOW}Use --help for usage information${NC}"
     return 1
+    
 elif [ "$#" -eq 1 ] && [ "$1" = "--help" ]; then
     echo -e "-----------------------------------------------------------------"
-    echo -e  "${YELLOW}USAGE: ${GREEN}source setup.sh ${BLUE}[--up ${GREEN}[config]${BLUE} | --all ${GREEN}[config]${BLUE} | --setenv | --down | --clean-data | --help]"
+    echo -e  "${YELLOW}USAGE: ${GREEN}source setup.sh ${BLUE}[config ${GREEN}[--all]${BLUE} | --up | --setup | --all | --setenv | --down | --stop | --clean-data | --help]"
     echo -e  "${YELLOW}"
-    echo -e  "  (no args):    Setup and deploy the application. Brings up all component microservices with separate"
-    echo -e  "                video summarization and video search UIs to perform video summarization and search respectively."
-    echo -e  "  --up:         Same as no args."
-    echo -e  "  --all:        Deploy all microservices with single unified video summarization and search UI. In this mode,"
-    echo -e  "                search is performed over video summaries text instead of videos - as done in default deployment (--up or no args)."
-    echo -e  "  --setenv:     Set environment variables without starting any containers"
-    echo -e  "  --down:       Bring down all the docker containers for the application which was brought up."
-    echo -e  "  --clean-data: Bring down all the docker containers and remove all docker volumes for the user data."
-    echo -e  "  --help:       Show this help message"
-    echo -e  "  config:       Optional argument (only works with --up or --all) to print the"
-    echo -e  "                final compose configuration with all variables resolved without"
-    echo -e  "                starting containers"
+    echo -e  "  (no args), --up, --setup:  Setup and deploy the application."
+    echo -e  "                             ${GRAY}Brings up all component microservices with separate video summarization and video search UIs"
+    echo -e  "                             to perform video summarization and search respectively.${NC}${YELLOW}"
+    echo -e  "                     --all:  Deploy all microservices with single unified video summarization and search UI. ${GRAY}In this mode,"
+    echo -e  "                             search is performed over video summaries text instead of videos itself.${NC}${YELLOW}"
+    echo -e  "                  --setenv:  Set environment variables without setting up application or starting any containers."
+    echo -e  "            --down, --stop:  Bring down all the docker containers for the application."
+    echo -e  "              --clean-data:  Bring down all the docker containers and remove all docker volumes for the user data."
+    echo -e  "                    --help:  Show this help message"
+    echo -e  "                    config:  Print the final compose configuration with all variables resolved without"
+    echo -e  "                             starting containers. Use 'config --all' for unified-UI mode."
+    echo -e  "${RED}"
+    echo -e  "       --summary, --search:  Deprecated aliases${MAGENTA} (accepted for backward compatibility. Behaves like default no arguments, --up or --setup)${NC}"
     echo -e  ""
-    echo -e  "  ${GREEN}Deprecated aliases${YELLOW} (accepted for backward compatibility; behave like --up):"
-    echo -e  "    --summary, --search${NC}"
-    echo -e "-----------------------------------------------------------------"
+    echo -e  "-----------------------------------------------------------------"
     return 0
 
-
 elif [ "$#" -ge 1 ] \
-     && [ "$1" != "--help" ] && [ "$1" != "--up" ] && [ "$1" != "--all" ] \
+     && [ "$1" != "--up" ] && [ "$1" != "--setup" ] \
      && [ "$1" != "--summary" ] && [ "$1" != "--search" ] \
-     && [ "$1" != "--setenv" ] && [ "$1" != "--down" ] && [ "$1" != "--clean-data" ]; then
+     && [ "$1" != "--setenv" ] && [ "$1" != "--clean-data" ] \
+     && [ "$1" != "--stop" ] && [ "$1" != "--down" ] \
+     && [ "$1" != "config" ] && [ "$1" != "--help" ] \
+     && [ "$1" != "--all" ]; then
     # Default case for unrecognized first option
     echo -e "${RED}Unknown option: $1 ${NC}"
     echo -e "${YELLOW}Use --help for usage information${NC}"
     return 1
 
-elif [ "$#" -eq 2 ] && [ "$2" != "config" ]; then
+elif [ "$#" -eq 2 ] && { [ "$1" != "config" ] || [ "$2" != "--all" ]; }; then
     # Invalid second argument
-    echo -e "${RED}Unknown second argument: $2${NC}"
-    echo -e "${YELLOW}The only valid second argument is 'config'${NC}"
-    return 1
-
-elif [ "$#" -eq 2 ] && [ "$2" = "config" ] \
-     && [ "$1" != "--up" ] && [ "$1" != "--all" ] && [ "$1" != "--summary" ] && [ "$1" != "--search" ]; then
-    # Config argument used with incorrect first argument
-    echo -e "${RED}The 'config' argument can only be used with --up or --all option (or legacy --summary/--search option)${NC}"
+    echo -e "${RED}Invalid argument combination: '$1 $2'${NC}"
+    echo -e "${YELLOW}The only valid two-argument form is: 'config --all'${NC}"
     echo -e "${YELLOW}Use --help for usage information${NC}"
     return 1
 
-elif [ "$1" = "--down" ]; then
-    # If --down is passed, bring down the Docker containers
-    echo -e "${YELLOW}Bringing down the Docker containers... ${NC}"
-    stop_containers
-    return $?
-
-elif [ "$1" = "--clean-data" ]; then
-    # If --clean-data is passed, bring down the Docker containers and remove volumes
-    stop_containers
-    if [ $? -ne 0 ]; then
-        echo -e "${RED}ERROR: Failed to stop and remove containers.${NC}"
-        return 1
+elif [ "$1" = "--down" ] || [ "$1" = "--stop" ] || [ "$1" = "--clean-data" ]; then
+    # Bring down all the Docker containers
+    stop_containers || return 1
+    # Remove volumes if --clean-data is specified
+    if [ "$1" = "--clean-data" ]; then
+        remove_volumes || return 1
+        echo -e "${GREEN}Clean operation completed successfully! ${NC}"
     fi
-
-    echo -e "${GREEN}All containers were successfully stopped and removed. ${NC}"
-    echo -e "${YELLOW}Removing Docker volumes created by the application... ${NC}"
-
-    # Remove volumes 
-    docker volume rm docker_minio_data docker_pg_data docker_vdms-db docker_audio_analyzer_data docker_data-prep docker_collector_signals 2>/dev/null || true
-    
-    if [ $? -eq 0 ]; then
-        echo -e "${GREEN}All volumes were successfully removed. ${NC}"
-    else
-        echo -e "${YELLOW}Note: Some volumes may not have existed or were already removed. ${NC}"
-    fi
-    echo -e "${GREEN}Clean operation completed successfully! ${NC}"
     return 0
 fi
 
-#  When no argument is provided, behave like --up (default dual-UI deployment)
+# ================================= SETUP ALIASES ======================================
+#  When no argument or --setup is provided, behave like --up (default dual-UI deployment)
 if [ "$#" -eq 0 ]; then
     set -- "--up"
-#  Older --summary/--search legacy aliases of --up (deprecation notice printed)
+elif [ "$1" = "--setup" ]; then
+    set -- "--up"
+# Older --summary/--search legacy aliases of --up (deprecation notice printed)
+# TODO: Remove in next version.
 elif [ "$1" = "--summary" ] || [ "$1" = "--search" ]; then
-    echo -e "${YELLOW}Note: '$1' is deprecated. The default deployment now brings up both${NC}"
-    echo -e "${YELLOW}      Video Summarization and Video Search as two separate UI instances.${NC}"
+    echo -e "${MAGENTA}Note: '$1' is deprecated. The default deployment now brings up both${NC}"
+    echo -e "$              Video Summarization and Video Search as two separate UI instances.${NC}"
     echo -e "${YELLOW}      Treating '$1' as default deployment to bring up both Summarization and Search UI Instances. ${NC}"
     echo -e "${YELLOW}      If you need the search on video summaries text, use '--all' instead.${NC}"
     set -- "--up" "$2"
+#  Create alias for 'config' option to behave like '--up config' or '--all config' for easier usage
+elif [ "$#" -eq 1 ] && [ "$1" = "config" ]; then
+    set -- "--up" "config"
+elif [ "$#" -eq 2 ] && [ "$1" = "config" ] && [ "$2" = "--all" ]; then
+    set -- "--all" "config"
 fi
-export APP_HOST_PORT=${APP_HOST_PORT:-12345}  # Default host port for nginx proxy (external access to UIs)
 
-# Host ports for the two nginx proxies (external access to each UI instance).
-#  - Summary UI  -> http://<host>:${APP_SUMMARY_HOST_PORT}
-#  - Search UI   -> http://<host>:${APP_SEARCH_HOST_PORT}
-# export APP_SUMMARY_HOST_PORT=${APP_SUMMARY_HOST_PORT:-${APP_HOST_PORT:-12345}}
-# export APP_SEARCH_HOST_PORT=${APP_SEARCH_HOST_PORT:-12346}
-
-# if [ "${APP_SUMMARY_HOST_PORT}" = "${APP_SEARCH_HOST_PORT}" ]; then
-#     echo -e "${RED}ERROR: APP_SUMMARY_HOST_PORT and APP_SEARCH_HOST_PORT cannot be the same (${APP_SUMMARY_HOST_PORT}).${NC}"
-#     return 1
-# fi
-
-# Export all environment variables
+# ================================== Export Environment Variables ===================================
 # Base configuration
+export APP_HOST_PORT=${APP_HOST_PORT:-12345}  # Default host port for nginx proxy (external access to UIs)
 export HOST_IP=$(ip route get 1 | awk '{print $7}')  # Fetch the host IP
 export TAG=${TAG:-latest}
 
@@ -392,7 +382,12 @@ if [[ "${EMBEDDING_PROCESSING_MODE}" == "api" ]]; then
     processing_scope+=", plus the multimodal-embedding-serving container"
 fi
 
-embedding_model_display=${EMBEDDING_MODEL_NAME:-"(not provided)"}
+if [ $1 = "--all" ]; then
+    embedding_model_display="${TEXT_EMBEDDING_MODEL:-"(not provided)"}"
+else
+    embedding_model_display="${EMBEDDING_MODEL_NAME:-"(not provided)"}"
+fi
+
 embedding_endpoint_display=${MULTIMODAL_EMBEDDING_ENDPOINT:-"(not configured)"}
 
 if [[ "${EMBEDDING_PROCESSING_MODE}" == "sdk" ]]; then
@@ -458,76 +453,67 @@ echo -e "[video-ingestion] ${GREEN}Output directory for object detection model: 
 
 
 # Verify if required environment variables are set in current shell, only when container down or clean is not requested.
-if [ "$1" != "--down" ] && [ "$1" != "--clean-data" ] && [ "$2" != "config" ]; then
+if [ "$1" != "--down" ] && [ "$1" != "--stop" ] && [ "$1" != "--clean-data" ] && [ "$2" != "config" ]; then
     if [ -z "$MINIO_ROOT_USER" ]; then
         echo -e "${RED}ERROR: MINIO_ROOT_USER is not set in your shell environment.${NC}"
-        return
+        return 1
     fi
-
     if [ -z "$MINIO_ROOT_PASSWORD" ]; then
         echo -e "${RED}ERROR: MINIO_ROOT_PASSWORD is not set in your shell environment.${NC}"
-        return
+        return 1
     fi
-
     if [ -z "$POSTGRES_USER" ]; then
         echo -e "${RED}ERROR: POSTGRES_USER is not set in your shell environment.${NC}"
-        return
+        return 1
     fi
     if [ -z "$POSTGRES_PASSWORD" ]; then
         echo -e "${RED}ERROR: POSTGRES_PASSWORD is not set in your shell environment.${NC}"
-        return
+        return 1
     fi
     if [ -z "$RABBITMQ_USER" ]; then
         echo -e "${RED}ERROR: RABBITMQ_USER is not set in your shell environment.${NC}"
-        return
+        return 1
     fi
     if [ -z "$RABBITMQ_PASSWORD" ]; then
         echo -e "${RED}ERROR: RABBITMQ_PASSWORD is not set in your shell environment.${NC}"
-        return
+        return 1
     fi
     if [ -z "$VLM_MODEL_NAME" ]; then
         echo -e "${RED}ERROR: VLM_MODEL_NAME is not set in your shell environment.${NC}"
-        return
+        return 1
     fi
     if [ -z "$ENABLED_WHISPER_MODELS" ]; then
         echo -e "${RED}ERROR: ENABLED_WHISPER_MODELS is not set in your shell environment.${NC}"
-        return
+        return 1
     fi
     if [ -z "$OD_MODEL_NAME" ]; then
         echo -e "${RED}ERROR: OD_MODEL_NAME is not set in your shell environment.${NC}"
-        return
+        return 1
     fi
-    if [ -z "$EMBEDDING_MODEL_NAME" ]; then
+    if [ "$1" != "--all" ] && [ -z "$EMBEDDING_MODEL_NAME" ]; then
         echo -e "${RED}ERROR: EMBEDDING_MODEL_NAME is not set in your shell environment.${NC}"
         echo -e "${YELLOW}This is required for both SDK and API embedding modes${NC}"
-        return
+        return 1
     fi
     
     # Validate embedding processing mode
     if [[ "$EMBEDDING_PROCESSING_MODE" != "api" && "$EMBEDDING_PROCESSING_MODE" != "sdk" ]]; then
         echo -e "${RED}Invalid EMBEDDING_PROCESSING_MODE: $EMBEDDING_PROCESSING_MODE${NC}"
         echo -e "${YELLOW}Valid options are: 'api' or 'sdk'${NC}"
-        return
+        return 1
     fi
-    # Enforce dedicated text-embedding selection only for the --all unified mode.
-    # In default (--up) mode the multimodal EMBEDDING_MODEL_NAME is sufficient.
-    # if [ "$1" = "--all" ]; then
-    #     if [ -z "$EMBEDDING_MODEL_NAME" ]; then
-    #         echo -e "${RED}ERROR: EMBEDDING_MODEL_NAME is not set in your shell environment.${NC}"
-    #         return
-    #     elif [ -z "$TEXT_EMBEDDING_MODEL_NAME" ]; then
-    #         echo -e "${RED}ERROR: TEXT_EMBEDDING_MODEL_NAME is not set in your shell environment.${NC}"
-    #         echo -e "${YELLOW}This is required for --all mode.${NC}"
-    #         return
-    #     fi
 
-    #     export EMBEDDING_MODEL_NAME=${TEXT_EMBEDDING_MODEL_NAME}
-    #     echo "Using TEXT_EMBEDDING_MODEL_NAME to override EMBEDDING_MODEL_NAME for --all mode."
-    # fi
+    # Enforce dedicated text-embedding selection only for the --all unified mode.
+    if [ "$1" = "--all" ] && [ -z "$TEXT_EMBEDDING_MODEL" ]; then
+        echo -e "${RED}ERROR: TEXT_EMBEDDING_MODEL is not set in your shell environment.${NC}"
+        echo -e "${YELLOW}This is required for --all mode.${NC}"
+        return 1
+    fi
+    
     if [ "$ENABLE_OVMS_LLM_SUMMARY" = true ] || [ "$ENABLE_OVMS_LLM_SUMMARY_GPU" = true ]; then
         if [ -z "$OVMS_LLM_MODEL_NAME" ]; then
             echo -e "${RED}ERROR: OVMS_LLM_MODEL_NAME is not set in your shell environment.${NC}"
-            return
+            return 1
         fi
     fi
 fi
@@ -676,23 +662,29 @@ export_model_for_ovms() {
 }
 
 if [ "$1" = "--up" ] || [ "$1" = "--all" ]; then
-    BACKEND_PROFILE="vlm-ov"
-
     export APP_FEATURE_MUX="ATOMIC"
     export VS_INDEX_NAME="video_frame_embeddings"
+    export NGINX_UI_CONF="dual_ui.conf"
     DEPLOYMENT_LABEL="Default dual-UI deployment for video summarization and searching"
+    BACKEND_PROFILE="vlm-ov"
+    UI_PROFILE="dual_ui"    # For separate summary and search UI instances
 
     if [ "$1" = "--all" ]; then
+        export EMBEDDING_MODEL_NAME=${TEXT_EMBEDDING_MODEL}
         export APP_FEATURE_MUX="SUMMARY_SEARCH"
         export VS_INDEX_NAME="video_summary_embeddings"
+        export NGINX_UI_CONF="unified_ui.conf"
+        UI_PROFILE="unified_ui"     # For unified single UI instance which searches after getting summary texts.
         DEPLOYMENT_LABEL="Search on Video Summary Texts - Unified UI deployment"
     fi
 
+    APP_COMPOSE_FILE="-f docker/compose.base.yaml -f docker/compose.summary.yaml -f docker/compose.search.yaml"
+    APP_COMPOSE_FILE="${APP_COMPOSE_FILE} -f docker/compose.ui.yaml"
     mkdir -p ${VS_WATCHER_DIR}
 
     echo -e  "[pipeline-manager] ${GREEN}Setting up: ${DEPLOYMENT_LABEL}${NC}"
     echo -e  "[video-search] ${GREEN}Using vector-DB index: ${YELLOW}${VS_INDEX_NAME}${NC}"
-    APP_COMPOSE_FILE="-f docker/compose.base.yaml -f docker/compose.summary.yaml -f docker/compose.search.yaml"
+    echo -e  "[nginx] ${GREEN}Using UI routing config: ${YELLOW}${NGINX_UI_CONF}${NC}"
     if [ "$ENABLE_VSS_COLLECTOR" = true ]; then
         APP_COMPOSE_FILE="$APP_COMPOSE_FILE -f docker/compose.telemetry.yaml"
         echo -e  "[telemetry] ${GREEN}vss-collector enabled (set ENABLE_VSS_COLLECTOR=true to keep enabled)${NC}"
@@ -820,7 +812,7 @@ if [ "$1" = "--up" ] || [ "$1" = "--all" ]; then
 
     # if config is passed, set the command to only generate the config
     FINAL_ARG="up -d" && [ "$2" = "config" ] && FINAL_ARG="config"
-    DOCKER_COMMAND="docker compose $APP_COMPOSE_FILE --profile $BACKEND_PROFILE $FINAL_ARG"
+    DOCKER_COMMAND="docker compose $APP_COMPOSE_FILE --profile $BACKEND_PROFILE --profile $UI_PROFILE $FINAL_ARG"
 fi
 
 # Run the Docker command to set up the application
@@ -836,12 +828,12 @@ if [ $? -ne 0 ]; then
 fi
 if [ "$2" !=  "config" ]; then
     echo -e "\n${GREEN}Setup completed successfully! 😎"
-    if [ "$2" != "--all" ]; then
+    if [ "$1" != "--all" ]; then
         echo -e "Two UI instances are now available:"
         echo -e "  • ${BLUE}Video Summarization UI:${NC} ${YELLOW}http://${HOST_IP}:${APP_HOST_PORT}/summary${NC}"
         echo -e "  • ${BLUE}Video Search UI:       ${NC} ${YELLOW}http://${HOST_IP}:${APP_HOST_PORT}/search${NC}"
     elif [ "$1" = "--all" ]; then
         echo -e "Unified UI is now available at: ${YELLOW}http://${HOST_IP}:${APP_HOST_PORT}${NC}"
-        echo -e "For compatibility reasons, the /summary and /search paths are still available and will route to the unified UI."
+        echo -e "${MAGENTA}For compatibility reasons, the /summary and /search paths are still available and will route to the unified UI.${NC}"
     fi
 fi

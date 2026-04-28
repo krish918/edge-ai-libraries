@@ -11,12 +11,16 @@ services:
       no_proxy: ${no_proxy},${MINIO_HOST},vss-search-ui,vss-summary-ui,${PM_HOST},localhost
       SEARCH_UI: vss-search-ui:8080
       SUMMARY_UI: vss-summary-ui:8080
+      UNIFIED_UI: vss-unified-ui:8080
+      UI_CONF_FILE: ${NGINX_UI_CONF}
       APP_MANAGER: ${PM_HOST}:3000
       APP_ASSETS: minio-service
-      NGINX_ENVSUBST_TEMPLATE_DIR: /etc/nginx/templates
+      NGINX_ENVSUBST_TEMPLATE_DIR: ${NGINX_TEMPLATE_DIR:-/etc/nginx/templates}
       NGINX_ENVSUBST_OUTPUT_DIR: /etc/nginx
     volumes:
-      - ${NGINX_CONFIG}:/etc/nginx/templates/nginx.conf.template
+      - ${NGINX_CONFIG}/nginx.conf:${NGINX_TEMPLATE_DIR}/nginx.conf.template:ro
+      - ${NGINX_CONFIG}/dual_ui.conf:${NGINX_TEMPLATE_DIR}/dual_ui.conf.template:ro
+      - ${NGINX_CONFIG}/unified_ui.conf:${NGINX_TEMPLATE_DIR}/unified_ui.conf.template:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost"]
       interval: 30s
@@ -24,60 +28,10 @@ services:
       retries: 3
       start_period: 5s
     depends_on:
-      vss-search-ui:
-        condition: service_started
-      vss-summary-ui:
-        condition: service_started
       pipeline-manager:
         condition: service_started
       minio-service:
         condition: service_started
-    networks:
-      - vs_network
-
-  vss-summary-ui:
-    build:
-      context: ../ui/react
-      dockerfile: Dockerfile
-    image: ${REGISTRY:-}vss-search-ui:${TAG:-latest}
-    ipc: host
-    environment:
-      no_proxy: ${no_proxy},${HOST_IP},${PM_HOST},minio-service,localhost
-      http_proxy: ${http_proxy}
-      https_proxy: ${https_proxy}
-      APP_ENDPOINT_URL: ${UI_PM_ENDPOINT}
-      APP_ASSETS_URL: ${UI_ASSETS_ENDPOINT}
-      APP_FEATURE_MUX: ${APP_FEATURE_MUX:-ATOMIC}
-      APP_SOCKET_APPEND: ${CONFIG_SOCKET_APPEND:-CONFIG_OFF}
-      APP_SUMMARY_FEATURE: FEATURE_ON
-      APP_SEARCH_FEATURE: FEATURE_OFF
-    depends_on:
-      pipeline-manager:
-        condition: service_started
-    restart: unless-stopped
-    networks:
-      - vs_network
-
-  vss-search-ui:
-    build:
-      context: ../ui/react
-      dockerfile: Dockerfile
-    image: ${REGISTRY:-}vss-search-ui:${TAG:-latest}
-    ipc: host
-    environment:
-      no_proxy: ${no_proxy},${HOST_IP},${PM_HOST},minio-service,localhost
-      http_proxy: ${http_proxy}
-      https_proxy: ${https_proxy}
-      APP_ENDPOINT_URL: ${UI_PM_ENDPOINT}
-      APP_ASSETS_URL: ${UI_ASSETS_ENDPOINT}
-      APP_FEATURE_MUX: ${APP_FEATURE_MUX:-ATOMIC}
-      APP_SOCKET_APPEND: ${CONFIG_SOCKET_APPEND:-CONFIG_OFF}
-      APP_SUMMARY_FEATURE: FEATURE_OFF
-      APP_SEARCH_FEATURE: FEATURE_ON
-    depends_on:
-      pipeline-manager:
-        condition: service_started
-    restart: unless-stopped
     networks:
       - vs_network
 

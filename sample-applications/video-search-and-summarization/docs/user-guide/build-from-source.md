@@ -83,10 +83,10 @@ This section shows how to build the Video Search and Summary sample application 
 
 5. Accessing the Application
 
-    After successfully starting the application, two UIs are available:
+    After successfully starting the application, both UIs are available through the nginx proxy:
 
-    - Video Summarization UI: `http://<host-ip>:12345`
-    - Video Search UI:        `http://<host-ip>:12346`
+    - Video Summarization UI: `http://<host-ip>:12345/summary/`
+    - Video Search UI:        `http://<host-ip>:12345/search/`
 
 ## Verification
 
