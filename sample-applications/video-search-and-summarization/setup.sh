@@ -27,29 +27,37 @@ stop_containers() {
 }
 
 # Setting command usage and invalid arguments handling before the actual setup starts
-if [ "$#" -eq 0 ] ||  ([ "$#" -eq 1 ] && [ "$1" = "--help" ]); then
-    # If no valid argument is passed, print usage information
-    echo -e "-----------------------------------------------------------------"
-    echo -e  "${YELLOW}USAGE: ${GREEN}source setup.sh ${BLUE}[--setenv | --down | --clean-data | --help | --summary ${GREEN}[config]${BLUE} | --search ${GREEN}[config]${BLUE} | --all ${GREEN}[config]${BLUE}]"
-    echo -e  "${YELLOW}"
-    echo -e  "  --setenv:     Set environment variables without starting any containers"
-    echo -e  "  --summary:    Configure and bring up Video Summarization application"
-    echo -e  "  --search:     Configure and bring up Video Search application"
-    echo -e  "  --all:        Configure and bring up both Video Summarization and Video Search applications"
-    echo -e  "  --down:       Bring down all the docker containers for the application which was brought up."
-    echo -e  "  --clean-data: Bring down all the docker containers and remove all docker volumes for the user data."
-    echo -e  "  --help:       Show this help message"
-    echo -e  "  config:       Optional argument (only works with --summary, --search, or --all) to print the final"
-    echo -e  "                compose configuration with all variables resolved without starting containers${NC}"
-    echo -e "-----------------------------------------------------------------"
-    return 0
-
-elif [ "$#" -gt 2 ]; then
+if [ "$#" -gt 2 ]; then
     echo -e "${RED}ERROR: Too many arguments provided.${NC}"
     echo -e "${YELLOW}Use --help for usage information${NC}"
     return 1
+elif [ "$#" -eq 1 ] && [ "$1" = "--help" ]; then
+    echo -e "-----------------------------------------------------------------"
+    echo -e  "${YELLOW}USAGE: ${GREEN}source setup.sh ${BLUE}[--up ${GREEN}[config]${BLUE} | --all ${GREEN}[config]${BLUE} | --setenv | --down | --clean-data | --help]"
+    echo -e  "${YELLOW}"
+    echo -e  "  (no args):    Setup and deploy the application. Brings up all component microservices with separate"
+    echo -e  "                video summarization and video search UIs to perform video summarization and search respectively."
+    echo -e  "  --up:         Same as no args."
+    echo -e  "  --all:        Deploy all microservices with single unified video summarization and search UI. In this mode,"
+    echo -e  "                search is performed over video summaries text instead of videos - as done in default deployment (--up or no args)."
+    echo -e  "  --setenv:     Set environment variables without starting any containers"
+    echo -e  "  --down:       Bring down all the docker containers for the application which was brought up."
+    echo -e  "  --clean-data: Bring down all the docker containers and remove all docker volumes for the user data."
+    echo -e  "  --help:       Show this help message"
+    echo -e  "  config:       Optional argument (only works with --up or --all) to print the"
+    echo -e  "                final compose configuration with all variables resolved without"
+    echo -e  "                starting containers"
+    echo -e  ""
+    echo -e  "  ${GREEN}Deprecated aliases${YELLOW} (accepted for backward compatibility; behave like --up):"
+    echo -e  "    --summary, --search${NC}"
+    echo -e "-----------------------------------------------------------------"
+    return 0
 
-elif [ "$1" != "--help" ] && [ "$1" != "--summary" ] && [ "$1" != "--all" ] && [ "$1" != "--search" ] && [ "$1" != "--setenv" ] && [ "$1" != "--down" ] && [ "$1" != "--clean-data" ]; then
+
+elif [ "$#" -ge 1 ] \
+     && [ "$1" != "--help" ] && [ "$1" != "--up" ] && [ "$1" != "--all" ] \
+     && [ "$1" != "--summary" ] && [ "$1" != "--search" ] \
+     && [ "$1" != "--setenv" ] && [ "$1" != "--down" ] && [ "$1" != "--clean-data" ]; then
     # Default case for unrecognized first option
     echo -e "${RED}Unknown option: $1 ${NC}"
     echo -e "${YELLOW}Use --help for usage information${NC}"
@@ -60,10 +68,11 @@ elif [ "$#" -eq 2 ] && [ "$2" != "config" ]; then
     echo -e "${RED}Unknown second argument: $2${NC}"
     echo -e "${YELLOW}The only valid second argument is 'config'${NC}"
     return 1
-    
-elif [ "$#" -eq 2 ] && [ "$2" = "config" ] && [ "$1" != "--summary" ] && [ "$1" != "--search" ] && [ "$1" != "--all" ]; then
+
+elif [ "$#" -eq 2 ] && [ "$2" = "config" ] \
+     && [ "$1" != "--up" ] && [ "$1" != "--all" ] && [ "$1" != "--summary" ] && [ "$1" != "--search" ]; then
     # Config argument used with incorrect first argument
-    echo -e "${RED}The 'config' argument can only be used with --summary, --search, or --all${NC}"
+    echo -e "${RED}The 'config' argument can only be used with --up or --all option (or legacy --summary/--search option)${NC}"
     echo -e "${YELLOW}Use --help for usage information${NC}"
     return 1
 
@@ -79,7 +88,7 @@ elif [ "$1" = "--clean-data" ]; then
     if [ $? -ne 0 ]; then
         echo -e "${RED}ERROR: Failed to stop and remove containers.${NC}"
         return 1
-    fi    
+    fi
 
     echo -e "${GREEN}All containers were successfully stopped and removed. ${NC}"
     echo -e "${YELLOW}Removing Docker volumes created by the application... ${NC}"
@@ -96,8 +105,29 @@ elif [ "$1" = "--clean-data" ]; then
     return 0
 fi
 
-# Host port for nginx proxy server (port on which we access the application)
-export APP_HOST_PORT=12345
+#  When no argument is provided, behave like --up (default dual-UI deployment)
+if [ "$#" -eq 0 ]; then
+    set -- "--up"
+#  Older --summary/--search legacy aliases of --up (deprecation notice printed)
+elif [ "$1" = "--summary" ] || [ "$1" = "--search" ]; then
+    echo -e "${YELLOW}Note: '$1' is deprecated. The default deployment now brings up both${NC}"
+    echo -e "${YELLOW}      Video Summarization and Video Search as two separate UI instances.${NC}"
+    echo -e "${YELLOW}      Treating '$1' as default deployment to bring up both Summarization and Search UI Instances. ${NC}"
+    echo -e "${YELLOW}      If you need the search on video summaries text, use '--all' instead.${NC}"
+    set -- "--up" "$2"
+fi
+export APP_HOST_PORT=${APP_HOST_PORT:-12345}  # Default host port for nginx proxy (external access to UIs)
+
+# Host ports for the two nginx proxies (external access to each UI instance).
+#  - Summary UI  -> http://<host>:${APP_SUMMARY_HOST_PORT}
+#  - Search UI   -> http://<host>:${APP_SEARCH_HOST_PORT}
+# export APP_SUMMARY_HOST_PORT=${APP_SUMMARY_HOST_PORT:-${APP_HOST_PORT:-12345}}
+# export APP_SEARCH_HOST_PORT=${APP_SEARCH_HOST_PORT:-12346}
+
+# if [ "${APP_SUMMARY_HOST_PORT}" = "${APP_SEARCH_HOST_PORT}" ]; then
+#     echo -e "${RED}ERROR: APP_SUMMARY_HOST_PORT and APP_SEARCH_HOST_PORT cannot be the same (${APP_SUMMARY_HOST_PORT}).${NC}"
+#     return 1
+# fi
 
 # Export all environment variables
 # Base configuration
@@ -285,7 +315,6 @@ export ALLOW_HEADERS=${ALLOW_HEADERS:-*}
 # env for multimodal-embedding-serving (unified embedding service)
 export EMBEDDING_SERVER_PORT=9777
 export EMBEDDING_MODEL_NAME=${EMBEDDING_MODEL_NAME}  # Must be explicitly provided - no default
-export TEXT_EMBEDDING_MODEL_NAME=${TEXT_EMBEDDING_MODEL_NAME}  # Optional - only required for unified case (--all)
 export DEFAULT_START_OFFSET_SEC=0
 export DEFAULT_CLIP_DURATION=${DEFAULT_CLIP_DURATION:--1}
 export DEFAULT_NUM_FRAMES=64
@@ -400,7 +429,16 @@ export VS_HOST=video-search
 export VS_ENDPOINT=http://$VS_HOST:8000
 
 # env for vss-ui
-export UI_HOST_PORT=9998
+# Two UI instances run in parallel (one scoped to Summary, one scoped to Search).
+# Each needs its own direct-access host port in addition to the nginx proxy port.
+# export UI_SUMMARY_HOST_PORT=${UI_SUMMARY_HOST_PORT:-9998}
+# export UI_SEARCH_HOST_PORT=${UI_SEARCH_HOST_PORT:-9999}
+# # export UI_HOST_PORT=${UI_SUMMARY_HOST_PORT}  # legacy alias
+
+# if [ "${UI_SUMMARY_HOST_PORT}" = "${UI_SEARCH_HOST_PORT}" ]; then
+#     echo -e "${RED}ERROR: UI_SUMMARY_HOST_PORT and UI_SEARCH_HOST_PORT cannot be the same (${UI_SUMMARY_HOST_PORT}).${NC}"
+#     return 1
+# fi
 # If nginx not being used, set this in your shell with pipeline manager's complete url with host and port. 
 export UI_PM_ENDPOINT=${UI_PM_ENDPOINT:-/manager}
 # if nginx not being used, set this in your shell with minio's complete url with host and port.
@@ -439,34 +477,30 @@ if [ "$1" != "--down" ] && [ "$1" != "--clean-data" ] && [ "$2" != "config" ]; t
         echo -e "${RED}ERROR: POSTGRES_PASSWORD is not set in your shell environment.${NC}"
         return
     fi
-    if [ "$1" != "--search" ]; then
-        if [ -z "$RABBITMQ_USER" ]; then
-            echo -e "${RED}ERROR: RABBITMQ_USER is not set in your shell environment.${NC}"
-            return
-        fi
-        if [ -z "$RABBITMQ_PASSWORD" ]; then
-            echo -e "${RED}ERROR: RABBITMQ_PASSWORD is not set in your shell environment.${NC}"
-            return
-        fi
-        if [ -z "$VLM_MODEL_NAME" ]; then
-            echo -e "${RED}ERROR: VLM_MODEL_NAME is not set in your shell environment.${NC}"
-            return
-        fi
-        if [ -z "$ENABLED_WHISPER_MODELS" ]; then
-            echo -e "${RED}ERROR: ENABLED_WHISPER_MODELS is not set in your shell environment.${NC}"
-            return
-        fi
-        if [ -z "$OD_MODEL_NAME" ]; then
-            echo -e "${RED}ERROR: OD_MODEL_NAME is not set in your shell environment.${NC}"
-            return
-        fi
+    if [ -z "$RABBITMQ_USER" ]; then
+        echo -e "${RED}ERROR: RABBITMQ_USER is not set in your shell environment.${NC}"
+        return
     fi
-    if [ "$1" != "--summary" ] || [ "$1" != "--all" ]; then
-        if [ -z "$EMBEDDING_MODEL_NAME" ]; then
-            echo -e "${RED}ERROR: EMBEDDING_MODEL_NAME is not set in your shell environment.${NC}"
-            echo -e "${YELLOW}This is required for both SDK and API embedding modes${NC}"
-            return
-        fi
+    if [ -z "$RABBITMQ_PASSWORD" ]; then
+        echo -e "${RED}ERROR: RABBITMQ_PASSWORD is not set in your shell environment.${NC}"
+        return
+    fi
+    if [ -z "$VLM_MODEL_NAME" ]; then
+        echo -e "${RED}ERROR: VLM_MODEL_NAME is not set in your shell environment.${NC}"
+        return
+    fi
+    if [ -z "$ENABLED_WHISPER_MODELS" ]; then
+        echo -e "${RED}ERROR: ENABLED_WHISPER_MODELS is not set in your shell environment.${NC}"
+        return
+    fi
+    if [ -z "$OD_MODEL_NAME" ]; then
+        echo -e "${RED}ERROR: OD_MODEL_NAME is not set in your shell environment.${NC}"
+        return
+    fi
+    if [ -z "$EMBEDDING_MODEL_NAME" ]; then
+        echo -e "${RED}ERROR: EMBEDDING_MODEL_NAME is not set in your shell environment.${NC}"
+        echo -e "${YELLOW}This is required for both SDK and API embedding modes${NC}"
+        return
     fi
     
     # Validate embedding processing mode
@@ -475,19 +509,21 @@ if [ "$1" != "--down" ] && [ "$1" != "--clean-data" ] && [ "$2" != "config" ]; t
         echo -e "${YELLOW}Valid options are: 'api' or 'sdk'${NC}"
         return
     fi
-    # Enforce dedicated text embedding selection for unified (--all) runs.
-    if [ "$1" = "--all" ]; then
-        if [ -z "$EMBEDDING_MODEL_NAME" ]; then
-            echo -e "${RED}ERROR: EMBEDDING_MODEL_NAME is not set in your shell environment.${NC}"
-            return
-        elif [ -z "$TEXT_EMBEDDING_MODEL_NAME" ]; then
-            echo -e "${RED}ERROR: TEXT_EMBEDDING_MODEL_NAME is not set in your shell environment.${NC}"
-            return
-        fi
+    # Enforce dedicated text-embedding selection only for the --all unified mode.
+    # In default (--up) mode the multimodal EMBEDDING_MODEL_NAME is sufficient.
+    # if [ "$1" = "--all" ]; then
+    #     if [ -z "$EMBEDDING_MODEL_NAME" ]; then
+    #         echo -e "${RED}ERROR: EMBEDDING_MODEL_NAME is not set in your shell environment.${NC}"
+    #         return
+    #     elif [ -z "$TEXT_EMBEDDING_MODEL_NAME" ]; then
+    #         echo -e "${RED}ERROR: TEXT_EMBEDDING_MODEL_NAME is not set in your shell environment.${NC}"
+    #         echo -e "${YELLOW}This is required for --all mode.${NC}"
+    #         return
+    #     fi
 
-        export EMBEDDING_MODEL_NAME=${TEXT_EMBEDDING_MODEL_NAME}
-        echo "Using TEXT_EMBEDDING_MODEL_NAME to override EMBEDDING_MODEL_NAME for --all mode."
-    fi
+    #     export EMBEDDING_MODEL_NAME=${TEXT_EMBEDDING_MODEL_NAME}
+    #     echo "Using TEXT_EMBEDDING_MODEL_NAME to override EMBEDDING_MODEL_NAME for --all mode."
+    # fi
     if [ "$ENABLE_OVMS_LLM_SUMMARY" = true ] || [ "$ENABLE_OVMS_LLM_SUMMARY_GPU" = true ]; then
         if [ -z "$OVMS_LLM_MODEL_NAME" ]; then
             echo -e "${RED}ERROR: OVMS_LLM_MODEL_NAME is not set in your shell environment.${NC}"
@@ -639,76 +675,31 @@ export_model_for_ovms() {
     cd $curr_dir
 }
 
-if [ "$1" = "--summary" ] || [ "$1" = "--all" ]; then
+if [ "$1" = "--up" ] || [ "$1" = "--all" ]; then
     BACKEND_PROFILE="vlm-ov"
 
-    # Turn on feature flags for summarization and turn off search
-    export SUMMARY_FEATURE="FEATURE_ON"
-    export SEARCH_FEATURE="FEATURE_OFF"
     export APP_FEATURE_MUX="ATOMIC"
+    export VS_INDEX_NAME="video_frame_embeddings"
+    DEPLOYMENT_LABEL="Default dual-UI deployment for video summarization and searching"
 
-    # If summarization is enabled, set up the environment for OVMS or VLM for summarization
-    [ "$1" = "--summary" ] && APP_COMPOSE_FILE="-f docker/compose.base.yaml -f docker/compose.summary.yaml" && \
-    echo -e  "[pipeline-manager] ${GREEN}Setting up Video Summarization application${NC}"
-
-    # If no arguments are passed or if --all is passed, set up both summarization and search   
-    [ "$1" = "--all" ] && \
-    echo -e  "[video-search] ${BLUE}Creating Docker volumes for Video Search services:${NC}" && \
-        export SEARCH_FEATURE="FEATURE_ON" && \
-        export APP_FEATURE_MUX="SUMMARY_SEARCH" && \
-        export VS_INDEX_NAME="video_summary_embeddings" && \
-        APP_COMPOSE_FILE="-f docker/compose.base.yaml -f docker/compose.summary.yaml -f docker/compose.search.yaml" && \
-        if [ "$ENABLE_VSS_COLLECTOR" = true ]; then
-            APP_COMPOSE_FILE="$APP_COMPOSE_FILE -f docker/compose.telemetry.yaml"
-            echo -e  "[telemetry] ${GREEN}vss-collector enabled (set ENABLE_VSS_COLLECTOR=true to keep enabled)${NC}"
-        else
-            echo -e  "[telemetry] ${YELLOW}vss-collector disabled (set ENABLE_VSS_COLLECTOR=true to enable)${NC}"
-        fi && \
-    echo -e  "[pipeline-manager] ${GREEN}Setting up both applications: Video Summarization and Video Search${NC}"
-    
-    # Create YOLOX models volume for all modes that include search functionality
-    if [ "$1" = "--all" ] && [ "$2" != "config" ]; then
-        if ! docker volume ls | grep -q "${YOLOX_MODELS_VOLUME_NAME}"; then
-            echo -e "[vdms-dataprep] ${BLUE}Creating Docker volume for YOLOX models: ${YOLOX_MODELS_VOLUME_NAME}${NC}"
-            docker volume create "${YOLOX_MODELS_VOLUME_NAME}"
-            if [ $? = 0 ]; then
-                echo -e "[vdms-dataprep] ${GREEN}YOLOX models volume created successfully${NC}"
-            else
-                echo -e "[vdms-dataprep] ${RED}ERROR: Failed to create YOLOX models volume${NC}"
-                return 1
-            fi
-        else
-            echo -e "[vdms-dataprep] ${GREEN}YOLOX models volume already exists: ${YOLOX_MODELS_VOLUME_NAME}${NC}"
-        fi
-
-        # Create ov-models volume for embedding models if it doesn't exist
-        if ! docker volume ls | grep -q "ov-models"; then
-            echo -e "[multimodal-embedding-serving] ${BLUE}Creating Docker volume for ov-models${NC}"
-            docker volume create ov-models
-            if [ $? = 0 ]; then
-                echo -e "[multimodal-embedding-serving] ${GREEN}ov-models volume created successfully${NC}"
-            else
-                echo -e "[multimodal-embedding-serving] ${RED}ERROR: Failed to create ov-models volume${NC}"
-                return 1
-            fi
-        else
-            echo -e "[multimodal-embedding-serving] ${GREEN}ov-models volume already exists${NC}"
-        fi
-
-        # Create data-prep volume if it doesn't exist
-        if ! docker volume ls | grep -q "data-prep"; then
-            echo -e "[vdms-dataprep] ${BLUE}Creating Docker volume for data-prep${NC}"
-            docker volume create data-prep
-            if [ $? = 0 ]; then
-                echo -e "[vdms-dataprep] ${GREEN}data-prep volume created successfully${NC}"
-            else
-                echo -e "[vdms-dataprep] ${RED}ERROR: Failed to create data-prep volume${NC}"
-                return 1
-            fi
-        else
-            echo -e "[vdms-dataprep] ${GREEN}data-prep volume already exists${NC}"
-        fi
+    if [ "$1" = "--all" ]; then
+        export APP_FEATURE_MUX="SUMMARY_SEARCH"
+        export VS_INDEX_NAME="video_summary_embeddings"
+        DEPLOYMENT_LABEL="Search on Video Summary Texts - Unified UI deployment"
     fi
+
+    mkdir -p ${VS_WATCHER_DIR}
+
+    echo -e  "[pipeline-manager] ${GREEN}Setting up: ${DEPLOYMENT_LABEL}${NC}"
+    echo -e  "[video-search] ${GREEN}Using vector-DB index: ${YELLOW}${VS_INDEX_NAME}${NC}"
+    APP_COMPOSE_FILE="-f docker/compose.base.yaml -f docker/compose.summary.yaml -f docker/compose.search.yaml"
+    if [ "$ENABLE_VSS_COLLECTOR" = true ]; then
+        APP_COMPOSE_FILE="$APP_COMPOSE_FILE -f docker/compose.telemetry.yaml"
+        echo -e  "[telemetry] ${GREEN}vss-collector enabled (set ENABLE_VSS_COLLECTOR=true to keep enabled)${NC}"
+    else
+        echo -e  "[telemetry] ${YELLOW}vss-collector disabled (set ENABLE_VSS_COLLECTOR=true to enable)${NC}"
+    fi
+
 
     # Validate expected OpenVINO artifact; directory-only checks can miss partial/incomplete model state.
     od_model_xml="${OD_MODEL_OUTPUT_DIR}/FP32/${OD_MODEL_NAME}.xml"
@@ -830,70 +821,6 @@ if [ "$1" = "--summary" ] || [ "$1" = "--all" ]; then
     # if config is passed, set the command to only generate the config
     FINAL_ARG="up -d" && [ "$2" = "config" ] && FINAL_ARG="config"
     DOCKER_COMMAND="docker compose $APP_COMPOSE_FILE --profile $BACKEND_PROFILE $FINAL_ARG"
-
-elif [ "$1" = "--search" ]; then
-    mkdir -p ${VS_WATCHER_DIR}
-    # Turn on feature flags for search and turn off summarization
-    export SUMMARY_FEATURE="FEATURE_OFF"
-    export SEARCH_FEATURE="FEATURE_ON"
-    export APP_FEATURE_MUX="ATOMIC"
-    export VS_INDEX_NAME="video_frame_embeddings"  # DB Index or DB Collection name for video search standalone setup
-
-    # Create YOLOX models volume for object detection if it doesn't exist
-    if ! docker volume ls | grep -q "${YOLOX_MODELS_VOLUME_NAME}"; then
-        echo -e "[vdms-dataprep] ${BLUE}Creating Docker volume for YOLOX models: ${YOLOX_MODELS_VOLUME_NAME}${NC}"
-        docker volume create "${YOLOX_MODELS_VOLUME_NAME}"
-        if [ $? = 0 ]; then
-            echo -e "[vdms-dataprep] ${GREEN}YOLOX models volume created successfully${NC}"
-        else
-            echo -e "[vdms-dataprep] ${RED}ERROR: Failed to create YOLOX models volume${NC}"
-            return 1
-        fi
-    else
-        echo -e "[vdms-dataprep] ${GREEN}YOLOX models volume already exists: ${YOLOX_MODELS_VOLUME_NAME}${NC}"
-    fi
-
-    # Create ov-models volume for embedding models if it doesn't exist
-    if ! docker volume ls | grep -q "ov-models"; then
-        echo -e "[multimodal-embedding-serving] ${BLUE}Creating Docker volume for ov-models${NC}"
-        docker volume create ov-models
-        if [ $? = 0 ]; then
-            echo -e "[multimodal-embedding-serving] ${GREEN}ov-models volume created successfully${NC}"
-        else
-            echo -e "[multimodal-embedding-serving] ${RED}ERROR: Failed to create ov-models volume${NC}"
-            return 1
-        fi
-    else
-        echo -e "[multimodal-embedding-serving] ${GREEN}ov-models volume already exists${NC}"
-    fi
-
-    # Create data-prep volume if it doesn't exist
-    if ! docker volume ls | grep -q "data-prep"; then
-        echo -e "[vdms-dataprep] ${BLUE}Creating Docker volume for data-prep${NC}"
-        docker volume create data-prep
-        if [ $? = 0 ]; then
-            echo -e "[vdms-dataprep] ${GREEN}data-prep volume created successfully${NC}"
-        else
-            echo -e "[vdms-dataprep] ${RED}ERROR: Failed to create data-prep volume${NC}"
-            return 1
-        fi
-    else
-        echo -e "[vdms-dataprep] ${GREEN}data-prep volume already exists${NC}"
-    fi
-
-    # If search is enabled, set up video search only
-    APP_COMPOSE_FILE="-f docker/compose.base.yaml -f docker/compose.search.yaml"
-    if [ "$ENABLE_VSS_COLLECTOR" = true ]; then
-        APP_COMPOSE_FILE="$APP_COMPOSE_FILE -f docker/compose.telemetry.yaml"
-        echo -e  "[telemetry] ${GREEN}vss-collector enabled (set ENABLE_VSS_COLLECTOR=true to keep enabled)${NC}"
-    else
-        echo -e  "[telemetry] ${YELLOW}vss-collector disabled (set ENABLE_VSS_COLLECTOR=true to enable)${NC}"
-    fi
-    echo -e  "[video-search] ${GREEN}Setting up Video Search application${NC}"
-
-    # if config is passed, set the command to only generate the config
-    FINAL_ARG="up -d" && [ "$2" = "config" ] && FINAL_ARG="config"
-    DOCKER_COMMAND="docker compose $APP_COMPOSE_FILE $FINAL_ARG"
 fi
 
 # Run the Docker command to set up the application
@@ -901,7 +828,7 @@ if [ -n "$DOCKER_COMMAND" ]; then
     echo -e  "${GREEN}Running Docker command: $DOCKER_COMMAND ${NC}"
     eval "$DOCKER_COMMAND"
 else
-    echo -e  "No valid setup command provided. Please use --summary, --search, or --all."
+    echo -e  "No valid setup command provided. Please run with --help option to see available commands."
 fi
 if [ $? -ne 0 ]; then
     echo -e "\n${RED}Failed: Some error occured while setting up one or more containers.${NC}"
@@ -909,5 +836,12 @@ if [ $? -ne 0 ]; then
 fi
 if [ "$2" !=  "config" ]; then
     echo -e "\n${GREEN}Setup completed successfully! 😎"
-    echo -e "Access the UI at: ${YELLOW}http://${HOST_IP}:${APP_HOST_PORT}${NC}"
+    if [ "$2" != "--all" ]; then
+        echo -e "Two UI instances are now available:"
+        echo -e "  • ${BLUE}Video Summarization UI:${NC} ${YELLOW}http://${HOST_IP}:${APP_HOST_PORT}/summary${NC}"
+        echo -e "  • ${BLUE}Video Search UI:       ${NC} ${YELLOW}http://${HOST_IP}:${APP_HOST_PORT}/search${NC}"
+    elif [ "$1" = "--all" ]; then
+        echo -e "Unified UI is now available at: ${YELLOW}http://${HOST_IP}:${APP_HOST_PORT}${NC}"
+        echo -e "For compatibility reasons, the /summary and /search paths are still available and will route to the unified UI."
+    fi
 fi
