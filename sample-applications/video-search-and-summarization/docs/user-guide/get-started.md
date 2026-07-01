@@ -22,9 +22,9 @@ The application supports **four** deployment modes. Each mode deploys only the s
 | **Summary** | Video summarization only | Summary UI available at `/` (root URI) | Summarize a given video with several tunable parameters. | `--summary` |
 | **Search** | Video Search only | Search UI available at `/` (root URI). | Search for entities in a given video. **Embedding used for search:** Video frame embeddings | `--search` |
 | **Dual UI** | Video Summarization and Video Search | Two separate UIs available at `/summary/` and `/search/` URI. | **Embedding used for search:** Video frame embeddings | `--summary --search` |
-| **Unified UI** | Video Summarization and **Modified** Video Search | A single unified UI available at `/` (root URI). | **Embedding used for search:** Summarized content text embeddings  | `--summary-and-search` |
+| **Unified UI** | Video Summarization and **Modified** Video Search | A single unified UI available at `/` (root URI). | **Embedding used for search:** Summarized content text embeddings plus bounded entity-focused summary documents | `--summary-and-search` |
 
-> **NOTE :** The video search in **Unified UI** mode is modified for creating the embeddings of video summary texts and searching over them, rather than creating and using video frame embeddings. Hence, this mode includes video summarization feature, as well, in the same UI.
+> **NOTE :** The video search in **Unified UI** mode is modified for creating embeddings of video summary texts and searching over them, rather than creating and using video frame embeddings. When entity-aware search is enabled, the pipeline also creates bounded entity-focused summary documents from detected object metadata so object-specific queries can match stronger text signals without changing the DataPrep `/summary` schema.
 
 ## Prerequisites
 
@@ -156,6 +156,25 @@ Before running the application, you need to set several environment variables:
       ```
 
       > **Note**: Review the supported model list in [supported-models](https://github.com/open-edge-platform/edge-ai-libraries/blob/main/microservices/multimodal-embedding-serving/docs/user-guide/supported-models.md) before choosing model names.
+
+      **Optional entity-aware search tuning in `--summary-and-search` mode:**
+
+      Unified mode enables entity-aware summary indexing and entity-aware search reranking by default. These settings improve object-specific queries by indexing bounded documents such as `Entity: person` or `Entity: car` alongside the normal chunk summary document. Entity focus is encoded in summary text and prefixed internal tags such as `doc:entity-summary` and `entity:person`; no new DataPrep request fields are required.
+
+      ```bash
+      # Roll back to the previous summary-only search behavior
+      export SEARCH_ENTITY_AWARE_INDEXING_ENABLED=false
+      export ENTITY_RERANK_ENABLED=false
+
+      # Reduce indexing work for crowded scenes
+      export SEARCH_ENTITY_DOCS_PER_CHUNK=4
+      export SEARCH_ENTITY_MIN_CONFIDENCE=0.50
+
+      # Restrict indexed objects to a known set when needed
+      export SEARCH_ENTITY_ALLOWED_LABELS="person,car,bicycle"
+      ```
+
+      If indexing is slow, reduce `SEARCH_ENTITY_DOCS_PER_CHUNK`, raise `SEARCH_ENTITY_MIN_CONFIDENCE`, or set an allowlist. If query latency rises, lower `AGGREGATION_INITIAL_K` after validating recall, reduce `ENTITY_RERANK_MAX_BOOST`, or disable `ENTITY_RERANK_ENABLED`.
 
 4. **Configure summarization to use audio transcript (Summary and Dual UI mode):**
 
@@ -310,7 +329,7 @@ In modes, where Video Search is available (Search, Dual UI and Unified UI mode),
 |------|-----------------|-----------------|--------------------|
 | Search | `video_frame_embeddings` | Multimodal embeddings of video frames | `MULTIMODAL_EMBEDDING_MODEL` |
 | Dual UI | `video_frame_embeddings` | Multimodal embeddings of video frames | `MULTIMODAL_EMBEDDING_MODEL` |
-| Unified UI | `video_summary_embeddings` | Text embeddings of generated summaries | `TEXT_EMBEDDING_MODEL` |
+| Unified UI | `video_summary_embeddings` | Text embeddings of generated summaries plus bounded entity-focused summary documents | `TEXT_EMBEDDING_MODEL` |
 
 > **Automated Video Ingestion**: The Video Search pipeline includes an optional Directory Watcher service for automated video processing. See the [Directory Watcher Service Guide](./directory-watcher-guide.md) for details.
 
@@ -606,6 +625,8 @@ Visiting the root URL `http://<host-ip>:12345/` redirects to the Video Summariza
 | UI | URL |
 |----|-----|
 | Unified Summary/Search | `http://<host-ip>:12345/` |
+
+In this mode, the application searches the `video_summary_embeddings` index. Each chunk summary is still indexed as before. Entity-aware indexing, enabled by default for this mode, adds a bounded number of entity-focused summary documents per chunk from detected object metadata and applies a lightweight entity-aware rerank in the search microservice before temporal aggregation. Disable both with `SEARCH_ENTITY_AWARE_INDEXING_ENABLED=false ENTITY_RERANK_ENABLED=false` if you need previous behavior.
 
 ### Customizing Application Port
 

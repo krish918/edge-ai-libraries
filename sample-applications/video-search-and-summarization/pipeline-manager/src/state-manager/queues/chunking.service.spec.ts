@@ -1,5 +1,7 @@
 // Copyright (C) 2025 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
+jest.mock('uuid', () => ({ v4: jest.fn(() => 'mock-uuid') }));
+
 import { Test, TestingModule } from '@nestjs/testing';
 import { ChunkingService } from './chunking.service';
 import { StateService } from '../services/state.service';
@@ -14,6 +16,9 @@ import { StateActionStatus } from '../models/state.model';
 import { DataPrepShimService } from '../../data-prep/services/data-prep-shim.service';
 import { FeaturesService } from '../../features/features.service';
 import { InferenceCountService } from '../../language-model/services/inference-count.service';
+import {
+  EntitySearchDocumentBuilderService,
+} from '../services/entity-search-document-builder.service';
 
 describe('ChunkingService', () => {
   let service: ChunkingService;
@@ -24,6 +29,7 @@ describe('ChunkingService', () => {
   let templateService: jest.Mocked<TemplateService>;
   let configService: jest.Mocked<ConfigService>;
   let dataPrepShimService: jest.Mocked<DataPrepShimService>;
+  let entitySearchDocumentBuilder: jest.Mocked<EntitySearchDocumentBuilderService>;
   let featuresService: jest.Mocked<FeaturesService>;
   let inferenceCountService: jest.Mocked<InferenceCountService>;
 
@@ -71,7 +77,7 @@ describe('ChunkingService', () => {
     };
 
     const configMock = {
-      get: jest.fn().mockImplementation((key) => {
+      get: jest.fn().mockImplementation((key: string) => {
         if (key === 'openai.vlmCaptioning.concurrent') return 2;
         if (key === 'openai.usecase') return 'default';
         return null;
@@ -85,6 +91,20 @@ describe('ChunkingService', () => {
           return { unsubscribe: jest.fn() };
         }),
       }),
+      createEmbeddingsFromSummaries: jest.fn().mockReturnValue(of({})),
+    };
+
+    const entitySearchDocumentBuilderMock = {
+      buildDocuments: jest.fn().mockReturnValue([
+        {
+          bucket_name: 'test-bucket',
+          video_id: 'video-1',
+          video_summary: 'This is a test caption',
+          video_start_time: 30,
+          video_end_time: 60,
+          tags: ['tag'],
+        },
+      ]),
     };
 
     const featuresMock = {
@@ -107,6 +127,10 @@ describe('ChunkingService', () => {
         { provide: TemplateService, useValue: templateMock },
         { provide: ConfigService, useValue: configMock },
         { provide: DataPrepShimService, useValue: dataPrepShimMock },
+        {
+          provide: EntitySearchDocumentBuilderService,
+          useValue: entitySearchDocumentBuilderMock,
+        },
         { provide: FeaturesService, useValue: featuresMock },
         { provide: InferenceCountService, useValue: inferenceCountMock },
       ],
@@ -126,6 +150,9 @@ describe('ChunkingService', () => {
     dataPrepShimService = module.get(
       DataPrepShimService,
     ) as jest.Mocked<DataPrepShimService>;
+    entitySearchDocumentBuilder = module.get(
+      EntitySearchDocumentBuilderService,
+    ) as jest.Mocked<EntitySearchDocumentBuilderService>;
     featuresService = module.get(
       FeaturesService,
     ) as jest.Mocked<FeaturesService>;
@@ -468,6 +495,90 @@ describe('ChunkingService', () => {
         { stateId: mockStateId, frames: ['2'], queueKey: '2' },
       ];
       expect(service.hasProcessing(mockStateId)).toBe(true);
+    });
+  });
+
+  describe('createChunkSearchEmbeddings', () => {
+    const stateWithFrames = {
+      stateId: mockStateId,
+      userInputs: {
+        chunkDuration: 30,
+      },
+      video: {
+        videoId: 'video-1',
+        tags: ['tag'],
+      },
+      frames: {
+        '1': { frameId: '1', chunkId: '0' },
+        '2': { frameId: '2', chunkId: '1' },
+        '3': { frameId: '3', chunkId: '1' },
+      },
+    };
+
+    it('builds batch documents and marks embeddings after batch success', () => {
+      const documents = [
+        {
+          bucket_name: 'test-bucket',
+          video_id: 'video-1',
+          video_summary: 'This is a test caption',
+          video_start_time: 30,
+          video_end_time: 60,
+          tags: ['tag', 'doc:chunk-summary'],
+        },
+        {
+          bucket_name: 'test-bucket',
+          video_id: 'video-1',
+          video_summary: 'Entity: person',
+          video_start_time: 30,
+          video_end_time: 60,
+          tags: ['tag', 'doc:entity-summary', 'entity:person'],
+        },
+      ];
+      stateService.fetch.mockReturnValue(stateWithFrames as any);
+      entitySearchDocumentBuilder.buildDocuments.mockReturnValue(documents);
+      dataPrepShimService.createEmbeddingsFromSummaries.mockReturnValue(
+        of({}) as any,
+      );
+
+      service.createChunkSearchEmbeddings({
+        stateId: mockStateId,
+        frameIds: mockFrameIds,
+        caption: 'This is a test caption',
+      });
+
+      expect(entitySearchDocumentBuilder.buildDocuments).toHaveBeenCalledWith({
+        state: stateWithFrames,
+        frameIds: mockFrameIds,
+        caption: 'This is a test caption',
+        bucketName: 'test-bucket',
+        chunkStartTime: 30,
+        chunkEndTime: 60,
+      });
+      expect(
+        dataPrepShimService.createEmbeddingsFromSummaries,
+      ).toHaveBeenCalledWith(documents);
+      expect(stateService.searchEmbeddingsCreated).toHaveBeenCalledWith(
+        mockStateId,
+        mockQueueKey,
+      );
+    });
+
+    it('does not mark embeddings when batch creation fails', () => {
+      stateService.fetch.mockReturnValue(stateWithFrames as any);
+      dataPrepShimService.createEmbeddingsFromSummaries.mockReturnValue(
+        throwError(() => new Error('batch failed')) as any,
+      );
+
+      service.createChunkSearchEmbeddings({
+        stateId: mockStateId,
+        frameIds: mockFrameIds,
+        caption: 'This is a test caption',
+      });
+
+      expect(
+        dataPrepShimService.createEmbeddingsFromSummaries,
+      ).toHaveBeenCalled();
+      expect(stateService.searchEmbeddingsCreated).not.toHaveBeenCalled();
     });
   });
 

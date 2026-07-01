@@ -32,6 +32,12 @@ videosearch:
     AGGREGATION_QUAL_TOP_MAX_COUNT: "6"
     AGGREGATION_CONTEXT_SIGMA_SECONDS: "40.0"
     AGGREGATION_CONTEXT_BOOST_STRENGTH: "0.5"
+    ENTITY_RERANK_ENABLED: "false"
+    ENTITY_RERANK_MAX_BOOST: "0.20"
+    ENTITY_RERANK_DOC_TYPE_BOOST: "0.05"
+    ENTITY_RERANK_EXACT_LABEL_BOOST: "0.15"
+    ENTITY_RERANK_SYNONYMS: "automobile=car,vehicle=car,people=person,persons=person"
+    ENTITY_RERANK_MIN_SCORE: ""
     SEARCH_DATAPREP_TIMEOUT_MS: "600000"
   
   containerPort: 8000  # Port on which container application listens internally

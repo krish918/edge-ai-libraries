@@ -19,6 +19,9 @@ import { AudioModule } from 'src/audio/audio.module';
 import { SearchModule } from 'src/search/search.module';
 import { FeaturesModule } from 'src/features/features.module';
 import { DataPrepModule } from 'src/data-prep/data-prep.module';
+import {
+  EntitySearchDocumentBuilderService,
+} from './services/entity-search-document-builder.service';
 
 @Module({
   providers: [
@@ -29,6 +32,7 @@ import { DataPrepModule } from 'src/data-prep/data-prep.module';
     UiService,
     StateDbService,
     AudioQueueService,
+    EntitySearchDocumentBuilderService,
   ],
   controllers: [StatesController, PipelineController],
   exports: [StateService, UiService, AudioQueueService],

@@ -18,6 +18,11 @@ export interface DataPrepSummaryDTO {
   tags: string[];
 }
 
+export interface DataPrepSummaryBatchOptions {
+  emitUpdate?: boolean;
+  concurrency?: number;
+}
+
 export interface DataPrepMinioRO {
   status: string;
   message: string;

@@ -573,6 +573,25 @@ def aggregate_frame_results_to_videos(frame_results: List[Any], max_results: int
             # VDMS can store datetime as an object with the actual value in _date
             created_at = best_frame_meta.get("date_time", {}).get("_date", "")
 
+        score_breakdown = dict(result["score_breakdown"])
+        best_frame_info = {
+            "timestamp": result["seek_info"]["best_frame_timestamp"],
+            "frame_number": best_frame_meta.get("frame_number", 0),
+            "frame_type": best_frame_meta.get("frame_type", "full_frame"),
+            "detection_confidence": best_frame_meta.get("detection_confidence"),
+            "detected_label": best_frame_meta.get("detected_label")
+        }
+        for key in (
+            "doc_type",
+            "entity_match_labels",
+            "entity_boost",
+            "semantic_score",
+            "reranked_score",
+        ):
+            if key in best_frame_meta and best_frame_meta.get(key) is not None:
+                best_frame_info[key] = best_frame_meta.get(key)
+                score_breakdown[key] = best_frame_meta.get(key)
+
         formatted_result = {
             "video_id": result["video_id"],
             "video_url": video_url,
@@ -582,14 +601,8 @@ def aggregate_frame_results_to_videos(frame_results: List[Any], max_results: int
             "segment_start": result["segment_start"],
             "segment_end": result["segment_end"],
             "relevance_score": result["final_score"],
-            "score_breakdown": result["score_breakdown"],
-            "best_frame_info": {
-                "timestamp": result["seek_info"]["best_frame_timestamp"],
-                "frame_number": best_frame_meta.get("frame_number", 0),
-                "frame_type": best_frame_meta.get("frame_type", "full_frame"),
-                "detection_confidence": best_frame_meta.get("detection_confidence"),
-                "detected_label": best_frame_meta.get("detected_label")
-            },
+            "score_breakdown": score_breakdown,
+            "best_frame_info": best_frame_info,
             "video_metadata": {
                 "duration": result["video_duration"],
                 "fps": best_frame_meta.get("fps", 30),

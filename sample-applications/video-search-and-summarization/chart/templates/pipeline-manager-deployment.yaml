@@ -221,6 +221,26 @@ spec:
               value: "http://{{ .Values.vdmsdataprep.name }}:{{ .Values.vdmsdataprep.service.port }}"
             - name: SEARCH_DATAPREP_TIMEOUT_MS
               value: "{{ .Values.pipelinemanager.env.SEARCH_DATAPREP_TIMEOUT_MS }}"
+            - name: SEARCH_ENTITY_AWARE_INDEXING_ENABLED
+              value: "{{ .Values.pipelinemanager.env.SEARCH_ENTITY_AWARE_INDEXING_ENABLED }}"
+            - name: SEARCH_ENTITY_DOCS_PER_CHUNK
+              value: "{{ .Values.pipelinemanager.env.SEARCH_ENTITY_DOCS_PER_CHUNK }}"
+            - name: SEARCH_ENTITY_MAX_OBJECTS_PER_FRAME
+              value: "{{ .Values.pipelinemanager.env.SEARCH_ENTITY_MAX_OBJECTS_PER_FRAME }}"
+            - name: SEARCH_ENTITY_MIN_CONFIDENCE
+              value: "{{ .Values.pipelinemanager.env.SEARCH_ENTITY_MIN_CONFIDENCE }}"
+            - name: SEARCH_ENTITY_ALLOWED_LABELS
+              value: "{{ .Values.pipelinemanager.env.SEARCH_ENTITY_ALLOWED_LABELS }}"
+            - name: SEARCH_ENTITY_DEDUP_BY_LABEL
+              value: "{{ .Values.pipelinemanager.env.SEARCH_ENTITY_DEDUP_BY_LABEL }}"
+            - name: SEARCH_ENTITY_INCLUDE_IN_TAGS
+              value: "{{ .Values.pipelinemanager.env.SEARCH_ENTITY_INCLUDE_IN_TAGS }}"
+            - name: SEARCH_ENTITY_CONTEXT_CHARS
+              value: "{{ .Values.pipelinemanager.env.SEARCH_ENTITY_CONTEXT_CHARS }}"
+            - name: SEARCH_DATAPREP_SUMMARY_BATCH_CONCURRENCY
+              value: "{{ .Values.pipelinemanager.env.SEARCH_DATAPREP_SUMMARY_BATCH_CONCURRENCY }}"
+            - name: SEARCH_DATAPREP_EMIT_BATCH_UPDATE_ONCE
+              value: "{{ .Values.pipelinemanager.env.SEARCH_DATAPREP_EMIT_BATCH_UPDATE_ONCE }}"
             {{- end }}
             - name: USE_VLLM
               value: "{{ .Values.pipelinemanager.env.USE_VLLM }}"

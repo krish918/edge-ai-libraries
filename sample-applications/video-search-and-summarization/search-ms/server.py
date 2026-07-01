@@ -18,6 +18,10 @@ from src.utils.directory_watcher import (
     get_last_updated,
     start_watcher,
 )
+from src.vdms_retriever.entity_reranker import (
+    apply_entity_aware_rerank,
+    summarize_rerank_stats,
+)
 from pydantic import BaseModel, Field, AliasChoices, ConfigDict
 
 app = FastAPI()
@@ -226,6 +230,36 @@ async def query_endpoint(request: list[QueryRequest]):
             )
 
             logger.info(f"Raw search returned {len(docs_with_score)} results")
+
+            if getattr(settings, "ENTITY_RERANK_ENABLED", False):
+                rerank_start = time.perf_counter()
+                docs_with_score = apply_entity_aware_rerank(
+                    docs_with_score,
+                    query_request.query,
+                    max_boost=getattr(settings, "ENTITY_RERANK_MAX_BOOST", 0.20),
+                    doc_type_boost=getattr(
+                        settings, "ENTITY_RERANK_DOC_TYPE_BOOST", 0.05
+                    ),
+                    exact_label_boost=getattr(
+                        settings, "ENTITY_RERANK_EXACT_LABEL_BOOST", 0.15
+                    ),
+                    synonyms=getattr(settings, "ENTITY_RERANK_SYNONYMS", ""),
+                    min_score=getattr(settings, "ENTITY_RERANK_MIN_SCORE", None),
+                    higher_is_better=str(
+                        getattr(settings, "DISTANCE_STRATEGY", "IP")
+                    ).upper()
+                    == "IP",
+                )
+                rerank_duration_ms = (time.perf_counter() - rerank_start) * 1000
+                rerank_stats = summarize_rerank_stats(docs_with_score)
+                logger.info(
+                    "Entity rerank completed in %.2f ms: total=%d, boosted=%d, max_boost=%.4f, labels=%s",
+                    rerank_duration_ms,
+                    rerank_stats["total"],
+                    rerank_stats["boosted"],
+                    rerank_stats["max_boost"],
+                    rerank_stats["match_labels"],
+                )
 
             # Add relevance scores to metadata
             filter_start = time.perf_counter()

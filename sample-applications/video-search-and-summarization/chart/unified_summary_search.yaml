@@ -6,6 +6,9 @@ vdmsvectordb:
   enabled: true
 videosearch:
   enabled: true
+  videosearch:
+    env:
+      ENTITY_RERANK_ENABLED: "true"
 rabbitmq:
   enabled: true
 ovms:
@@ -24,6 +27,7 @@ pipelinemanager:
     SEARCH_DATAPREP_TIMEOUT_MS: "600000"
     SUMMARY_FEATURE: "FEATURE_ON"
     SEARCH_FEATURE: "FEATURE_ON"
+    SEARCH_ENTITY_AWARE_INDEXING_ENABLED: "true"
 
 summaryui:
   enabled: true

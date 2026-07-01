@@ -109,3 +109,15 @@ spec:
               value: {{ .Values.videosearch.env.AGGREGATION_CONTEXT_SIGMA_SECONDS | quote }}
             - name: AGGREGATION_CONTEXT_BOOST_STRENGTH
               value: {{ .Values.videosearch.env.AGGREGATION_CONTEXT_BOOST_STRENGTH | quote }}
+            - name: ENTITY_RERANK_ENABLED
+              value: {{ .Values.videosearch.env.ENTITY_RERANK_ENABLED | quote }}
+            - name: ENTITY_RERANK_MAX_BOOST
+              value: {{ .Values.videosearch.env.ENTITY_RERANK_MAX_BOOST | quote }}
+            - name: ENTITY_RERANK_DOC_TYPE_BOOST
+              value: {{ .Values.videosearch.env.ENTITY_RERANK_DOC_TYPE_BOOST | quote }}
+            - name: ENTITY_RERANK_EXACT_LABEL_BOOST
+              value: {{ .Values.videosearch.env.ENTITY_RERANK_EXACT_LABEL_BOOST | quote }}
+            - name: ENTITY_RERANK_SYNONYMS
+              value: {{ .Values.videosearch.env.ENTITY_RERANK_SYNONYMS | quote }}
+            - name: ENTITY_RERANK_MIN_SCORE
+              value: {{ .Values.videosearch.env.ENTITY_RERANK_MIN_SCORE | quote }}

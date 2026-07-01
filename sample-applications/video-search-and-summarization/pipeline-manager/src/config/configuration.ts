@@ -2,6 +2,65 @@
 // SPDX-License-Identifier: Apache-2.0
 import { CONFIG_STATE } from 'src/features/features.model';
 
+const parseBoolean = (
+  envName: string,
+  value: string | undefined,
+  defaultValue: boolean,
+): boolean => {
+  if (value === undefined || value.trim() === '') {
+    return defaultValue;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (['true', '1', 'yes', 'y', 'on'].includes(normalized)) {
+    return true;
+  }
+
+  if (['false', '0', 'no', 'n', 'off'].includes(normalized)) {
+    return false;
+  }
+
+  console.warn(
+    `Invalid boolean value for ${envName}: "${value}". Using default ${defaultValue}.`,
+  );
+  return defaultValue;
+};
+
+const parseNumber = (
+  envName: string,
+  value: string | undefined,
+  defaultValue: number,
+  options: { integer?: boolean; min?: number; max?: number } = {},
+): number => {
+  if (value === undefined || value.trim() === '') {
+    return defaultValue;
+  }
+
+  const parsed = Number(value);
+  const belowMin = options.min !== undefined && parsed < options.min;
+  const aboveMax = options.max !== undefined && parsed > options.max;
+
+  if (!Number.isFinite(parsed) || belowMin || aboveMax) {
+    console.warn(
+      `Invalid numeric value for ${envName}: "${value}". Using default ${defaultValue}.`,
+    );
+    return defaultValue;
+  }
+
+  return options.integer ? Math.floor(parsed) : parsed;
+};
+
+const parseAllowedLabels = (value: string | undefined): string[] => {
+  if (!value) {
+    return [];
+  }
+
+  return value
+    .split(',')
+    .map((label) => label.trim().toLowerCase())
+    .filter((label) => label.length > 0);
+};
+
 export default () => ({
   features: {
     summary: process.env.SUMMARY_FEATURE,
@@ -23,6 +82,61 @@ export default () => ({
     dataPrepTimeoutMs: process.env.SEARCH_DATAPREP_TIMEOUT_MS
       ? Number(process.env.SEARCH_DATAPREP_TIMEOUT_MS)
       : 30000,
+    entityAware: {
+      indexingEnabled: parseBoolean(
+        'SEARCH_ENTITY_AWARE_INDEXING_ENABLED',
+        process.env.SEARCH_ENTITY_AWARE_INDEXING_ENABLED,
+        false,
+      ),
+      docsPerChunk: parseNumber(
+        'SEARCH_ENTITY_DOCS_PER_CHUNK',
+        process.env.SEARCH_ENTITY_DOCS_PER_CHUNK,
+        8,
+        { integer: true, min: 0 },
+      ),
+      maxObjectsPerFrame: parseNumber(
+        'SEARCH_ENTITY_MAX_OBJECTS_PER_FRAME',
+        process.env.SEARCH_ENTITY_MAX_OBJECTS_PER_FRAME,
+        10,
+        { integer: true, min: 0 },
+      ),
+      minConfidence: parseNumber(
+        'SEARCH_ENTITY_MIN_CONFIDENCE',
+        process.env.SEARCH_ENTITY_MIN_CONFIDENCE,
+        0.35,
+        { min: 0, max: 1 },
+      ),
+      allowedLabels: parseAllowedLabels(
+        process.env.SEARCH_ENTITY_ALLOWED_LABELS,
+      ),
+      dedupByLabel: parseBoolean(
+        'SEARCH_ENTITY_DEDUP_BY_LABEL',
+        process.env.SEARCH_ENTITY_DEDUP_BY_LABEL,
+        true,
+      ),
+      includeInTags: parseBoolean(
+        'SEARCH_ENTITY_INCLUDE_IN_TAGS',
+        process.env.SEARCH_ENTITY_INCLUDE_IN_TAGS,
+        true,
+      ),
+      contextChars: parseNumber(
+        'SEARCH_ENTITY_CONTEXT_CHARS',
+        process.env.SEARCH_ENTITY_CONTEXT_CHARS,
+        700,
+        { integer: true, min: 0 },
+      ),
+      dataPrepSummaryBatchConcurrency: parseNumber(
+        'SEARCH_DATAPREP_SUMMARY_BATCH_CONCURRENCY',
+        process.env.SEARCH_DATAPREP_SUMMARY_BATCH_CONCURRENCY,
+        3,
+        { integer: true, min: 1 },
+      ),
+      emitBatchUpdateOnce: parseBoolean(
+        'SEARCH_DATAPREP_EMIT_BATCH_UPDATE_ONCE',
+        process.env.SEARCH_DATAPREP_EMIT_BATCH_UPDATE_ONCE,
+        true,
+      ),
+    },
   },
   database: {
     host: process.env.DB_HOST,

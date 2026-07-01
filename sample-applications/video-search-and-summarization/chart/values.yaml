@@ -137,6 +137,16 @@ pipelinemanager:
     SUMMARY_FEATURE: "FEATURE_OFF"
     SEARCH_FEATURE: "FEATURE_OFF"
     SEARCH_DATAPREP_TIMEOUT_MS: "600000"
+    SEARCH_ENTITY_AWARE_INDEXING_ENABLED: "false"
+    SEARCH_ENTITY_DOCS_PER_CHUNK: "8"
+    SEARCH_ENTITY_MAX_OBJECTS_PER_FRAME: "10"
+    SEARCH_ENTITY_MIN_CONFIDENCE: "0.35"
+    SEARCH_ENTITY_ALLOWED_LABELS: ""
+    SEARCH_ENTITY_DEDUP_BY_LABEL: "true"
+    SEARCH_ENTITY_INCLUDE_IN_TAGS: "true"
+    SEARCH_ENTITY_CONTEXT_CHARS: "700"
+    SEARCH_DATAPREP_SUMMARY_BATCH_CONCURRENCY: "3"
+    SEARCH_DATAPREP_EMIT_BATCH_UPDATE_ONCE: "true"
   nodeSelector: {}
   affinity: {}
   tolerations: []
@@ -241,6 +251,14 @@ vdmsvectordb:
 videosearch:
   enabled: false
   name: videosearch
+  videosearch:
+    env:
+      ENTITY_RERANK_ENABLED: "false"
+      ENTITY_RERANK_MAX_BOOST: "0.20"
+      ENTITY_RERANK_DOC_TYPE_BOOST: "0.05"
+      ENTITY_RERANK_EXACT_LABEL_BOOST: "0.15"
+      ENTITY_RERANK_SYNONYMS: "automobile=car,vehicle=car,people=person,persons=person"
+      ENTITY_RERANK_MIN_SCORE: ""
   service:
     type: ClusterIP
     port: 8000

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: (C) 2026 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
+
 # Video Search Microservice Configuration
 # Frame-to-Video Aggregation Settings
 
@@ -44,6 +47,15 @@ aggregation:
     overlap_filter_enabled: true  # Enable temporal overlap filtering
     min_frame_score_threshold: 0.5  # Minimum relevance score to consider
 
+# Entity-aware reranking configuration
+entity_rerank:
+  enabled: false  # ENTITY_RERANK_ENABLED
+  max_boost: 0.20  # ENTITY_RERANK_MAX_BOOST
+  doc_type_boost: 0.05  # ENTITY_RERANK_DOC_TYPE_BOOST
+  exact_label_boost: 0.15  # ENTITY_RERANK_EXACT_LABEL_BOOST
+  synonyms: "automobile=car,vehicle=car,people=person,persons=person"  # ENTITY_RERANK_SYNONYMS
+  min_score: null  # ENTITY_RERANK_MIN_SCORE
+
 # Environment Variable Mapping
 # These can be overridden via environment variables:
 #
@@ -60,6 +72,12 @@ aggregation:
 # AGGREGATION_QUAL_TOP_MAX_COUNT=6
 # AGGREGATION_CONTEXT_SIGMA_SECONDS=40.0
 # AGGREGATION_CONTEXT_BOOST_STRENGTH=0.5
+# ENTITY_RERANK_ENABLED=false
+# ENTITY_RERANK_MAX_BOOST=0.20
+# ENTITY_RERANK_DOC_TYPE_BOOST=0.05
+# ENTITY_RERANK_EXACT_LABEL_BOOST=0.15
+# ENTITY_RERANK_SYNONYMS=automobile=car,vehicle=car,people=person,persons=person
+# ENTITY_RERANK_MIN_SCORE=
 
 # Example Docker Compose Override:
 # environment:

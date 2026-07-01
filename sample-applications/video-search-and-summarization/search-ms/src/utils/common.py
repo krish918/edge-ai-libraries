@@ -3,8 +3,9 @@
 
 import logging
 import os
+from typing import Optional
 from pydantic_settings import BaseSettings
-from pydantic import Field
+from pydantic import Field, field_validator
 from dotenv import load_dotenv
 
 # Configure logger
@@ -92,6 +93,30 @@ class Settings(BaseSettings):
     AGGREGATION_CONTEXT_BOOST_STRENGTH: float = Field(
         default=0.5, env="AGGREGATION_CONTEXT_BOOST_STRENGTH"
     )
+
+    # Entity-aware reranking settings
+    ENTITY_RERANK_ENABLED: bool = Field(default=False, env="ENTITY_RERANK_ENABLED")
+    ENTITY_RERANK_MAX_BOOST: float = Field(default=0.20, env="ENTITY_RERANK_MAX_BOOST")
+    ENTITY_RERANK_DOC_TYPE_BOOST: float = Field(
+        default=0.05, env="ENTITY_RERANK_DOC_TYPE_BOOST"
+    )
+    ENTITY_RERANK_EXACT_LABEL_BOOST: float = Field(
+        default=0.15, env="ENTITY_RERANK_EXACT_LABEL_BOOST"
+    )
+    ENTITY_RERANK_SYNONYMS: str = Field(
+        default="automobile=car,vehicle=car,people=person,persons=person",
+        env="ENTITY_RERANK_SYNONYMS",
+    )
+    ENTITY_RERANK_MIN_SCORE: Optional[float] = Field(
+        default=None, env="ENTITY_RERANK_MIN_SCORE"
+    )
+
+    @field_validator("ENTITY_RERANK_MIN_SCORE", mode="before")
+    @classmethod
+    def empty_rerank_min_score_is_unset(cls, value):
+        if value == "":
+            return None
+        return value
 
 
 settings = Settings()

@@ -19,7 +19,9 @@ import { InferenceCountService } from 'src/language-model/services/inference-cou
 import { State, StateActionStatus, StateChunkFrame } from '../models/state.model';
 import { TemplateService } from 'src/language-model/services/template.service';
 import { DataPrepShimService } from 'src/data-prep/services/data-prep-shim.service';
-import { DataPrepSummaryDTO } from 'src/data-prep/models/data-prep.models';
+import {
+  EntitySearchDocumentBuilderService,
+} from '../services/entity-search-document-builder.service';
 
 @Injectable()
 export class ChunkingService {
@@ -42,6 +44,7 @@ export class ChunkingService {
     private $emitter: EventEmitter2,
     private $dataStore: DatastoreService,
     private $searchDataPrep: DataPrepShimService,
+    private $entitySearchDocumentBuilder: EntitySearchDocumentBuilderService,
     private $feature: FeaturesService,
     private $inferenceCount: InferenceCountService,
     private $template: TemplateService,
@@ -397,31 +400,35 @@ export class ChunkingService {
       const chunkStartTime = +midFrame.chunkId * chunkDuration;
       const chunkEndTime = chunkStartTime + chunkDuration;
 
-      const embeddingDTO: DataPrepSummaryDTO = {
-        bucket_name: this.$dataStore.bucket,
-        video_id: state.video.videoId,
-        video_summary: caption,
-        video_start_time: chunkStartTime,
-        video_end_time: chunkEndTime,
-        tags: state.video.tags,
-      };
+      const documents = this.$entitySearchDocumentBuilder.buildDocuments({
+        state,
+        frameIds,
+        caption,
+        bucketName: this.$dataStore.bucket,
+        chunkStartTime,
+        chunkEndTime,
+      });
+      const entityDocumentCount = documents.filter((document) =>
+        document.tags.includes('doc:entity-summary'),
+      ).length;
 
-      this.$searchDataPrep.createEmbeddingsFromSummary(embeddingDTO).subscribe({
+      this.$searchDataPrep.createEmbeddingsFromSummaries(documents).subscribe({
         next: () => {
           Logger.log(
-            'Search embeddings created for chunk',
-            stateId,
-            frameIds,
-            caption,
+            `Search embeddings created for chunk ${stateId}:${frameIds.join(
+              '#',
+            )}; documents=${documents.length}; entityDocuments=${entityDocumentCount}`,
+            ChunkingService.name,
           );
           this.$state.searchEmbeddingsCreated(stateId, frameIds.join('#'));
         },
         error: (error: any) => {
           Logger.error(
-            'Error creating search embeddings for chunk',
-            stateId,
-            frameIds,
-            error,
+            `Error creating search embeddings for chunk ${stateId}:${frameIds.join(
+              '#',
+            )}; documents=${documents.length}`,
+            error instanceof Error ? error.stack : String(error),
+            ChunkingService.name,
           );
         },
       });
