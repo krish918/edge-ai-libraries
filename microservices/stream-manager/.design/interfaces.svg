@@ -130,12 +130,12 @@
 <text x="1180" y="878" font-family="DejaVu Sans Mono, Consolas, Menlo, monospace" font-size="12" font-weight="normal" fill="#5B6B7B" text-anchor="start">ctx, recordingPath</text>
 <rect x="40" y="1046" width="480" height="58" rx="8" fill="#FFFFFF" stroke="#0F766E" stroke-width="1.4" stroke-dasharray="7 5"/>
 <text x="60" y="1082" font-family="DejaVu Sans, Segoe UI, Helvetica, Arial, sans-serif" font-size="16" font-weight="bold" fill="#0F766E" text-anchor="start">tmpfs (RAM)</text>
-<text x="500" y="1082" font-family="DejaVu Sans, Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="normal" fill="#5B6B7B" text-anchor="end">rolling 1 s video slices</text>
+<text x="500" y="1082" font-family="DejaVu Sans, Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="normal" fill="#5B6B7B" text-anchor="end">rolling 2 s TS slices</text>
 <rect x="630" y="1046" width="480" height="58" rx="8" fill="#FFFFFF" stroke="#2563A0" stroke-width="1.4" stroke-dasharray="7 5"/>
 <text x="650" y="1082" font-family="DejaVu Sans, Segoe UI, Helvetica, Arial, sans-serif" font-size="16" font-weight="bold" fill="#2563A0" text-anchor="start">SQLite</text>
 <text x="1090" y="1082" font-family="DejaVu Sans, Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="normal" fill="#5B6B7B" text-anchor="end">one row per recording</text>
 <rect x="1160" y="1046" width="480" height="58" rx="8" fill="#FFFFFF" stroke="#2563A0" stroke-width="1.4" stroke-dasharray="7 5"/>
-<text x="1180" y="1082" font-family="DejaVu Sans, Segoe UI, Helvetica, Arial, sans-serif" font-size="16" font-weight="bold" fill="#2563A0" text-anchor="start">Filesystem  ·  S3 (optional)</text>
+<text x="1180" y="1082" font-family="DejaVu Sans, Segoe UI, Helvetica, Arial, sans-serif" font-size="16" font-weight="bold" fill="#2563A0" text-anchor="start">Filesystem</text>
 <text x="1620" y="1082" font-family="DejaVu Sans, Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="normal" fill="#5B6B7B" text-anchor="end">finished media files</text>
 <polyline points="870.0,1006 870.0,1046" fill="none" stroke="#8A9AAB" stroke-width="1.8" stroke-linejoin="round"/>
 <polygon points="870.0,1046 865.0,1036.0 875.0,1036.0" fill="#8A9AAB"/>
