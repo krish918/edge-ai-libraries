@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-FileCopyrightText: (C) 2026 Intel Corporation -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1100" viewBox="0 0 1600 1100" role="img" aria-labelledby="title desc">
+<title id="title">Finalize on filesystem -&gt; ready</title>
+<desc id="desc">Sequence diagram of finalizing a recording on the local filesystem: slices are appended directly to the recording&#x27;s final .ts path from the start (never a .partial file, so the recording stays playable throughout); fsync makes it durable, and the metadata row&#x27;s state (recording -&gt; finalizing -&gt; ready/failed) is the single source of truth for completion.</desc>
+<rect x="0" y="0" width="1600" height="1100" rx="0" fill="#F5F8FB" stroke="#F5F8FB" stroke-width="1.5"/>
+<rect x="48" y="35" width="7" height="94" rx="2" fill="#147A6D" stroke="#147A6D" stroke-width="1.5"/>
+<text x="74" y="72" font-family="DejaVu Sans" font-size="32" font-weight="bold" fill="#193449" text-anchor="start">Recording strategy - High level Design</text>
+<text x="74" y="116" font-family="DejaVu Sans" font-size="25" font-weight="bold" fill="#2563A0" text-anchor="start">03 / Finalize on filesystem -&gt; ready</text>
+<text x="1552" y="54" font-family="DejaVu Sans" font-size="14" font-weight="normal" fill="#53677B" text-anchor="end">PROPOSED</text>
+<polyline points="48,1048 1552,1048" fill="none" stroke="#D2DDE7" stroke-width="1" stroke-linejoin="round"/>
+<text x="48" y="1075" font-family="DejaVu Sans" font-size="13" font-weight="normal" fill="#53677B" text-anchor="start">(C) 2026 Intel Corporation  |  SPDX-License-Identifier: Apache-2.0</text>
+<text x="1552" y="1075" font-family="DejaVu Sans" font-size="15" font-weight="normal" fill="#53677B" text-anchor="end">03 / 03</text>
+<rect x="90" y="174" width="420" height="128" rx="12" fill="#FFFFFF" stroke="#D2DDE7" stroke-width="1.5"/>
+<rect x="90" y="174" width="5" height="128" rx="2" fill="#2563A0" stroke="#2563A0" stroke-width="0"/>
+<text x="112" y="209" font-family="DejaVu Sans" font-size="20" font-weight="bold" fill="#2563A0" text-anchor="start">Recording worker</text>
+<text x="112" y="243" font-family="DejaVu Sans" font-size="21" font-weight="normal" fill="#193449" text-anchor="start">Reads tmpfs slices</text>
+<polyline points="300,310 300,790" fill="none" stroke="#D2DDE7" stroke-width="2" stroke-linejoin="round" stroke-dasharray="7 6"/>
+<rect x="590" y="174" width="420" height="128" rx="12" fill="#FFFFFF" stroke="#D2DDE7" stroke-width="1.5"/>
+<rect x="590" y="174" width="5" height="128" rx="2" fill="#2563A0" stroke="#2563A0" stroke-width="0"/>
+<text x="612" y="209" font-family="DejaVu Sans" font-size="20" font-weight="bold" fill="#2563A0" text-anchor="start">Filesystem</text>
+<text x="612" y="243" font-family="DejaVu Sans" font-size="21" font-weight="normal" fill="#193449" text-anchor="start">Recordings directory</text>
+<polyline points="800,310 800,790" fill="none" stroke="#D2DDE7" stroke-width="2" stroke-linejoin="round" stroke-dasharray="7 6"/>
+<rect x="1090" y="174" width="420" height="128" rx="12" fill="#FFFFFF" stroke="#D2DDE7" stroke-width="1.5"/>
+<rect x="1090" y="174" width="5" height="128" rx="2" fill="#147A6D" stroke="#147A6D" stroke-width="0"/>
+<text x="1112" y="209" font-family="DejaVu Sans" font-size="20" font-weight="bold" fill="#147A6D" text-anchor="start">Metadata store</text>
+<text x="1112" y="243" font-family="DejaVu Sans" font-size="21" font-weight="normal" fill="#193449" text-anchor="start">SQLite: state + path</text>
+<polyline points="1300,310 1300,790" fill="none" stroke="#D2DDE7" stroke-width="2" stroke-linejoin="round" stroke-dasharray="7 6"/>
+<polyline points="300,400 800,400" fill="none" stroke="#2563A0" stroke-width="2.5" stroke-linejoin="round"/>
+<polygon points="800,400 789.0,405.0 789.0,395.0" fill="#2563A0"/>
+<rect x="282.678466796875" y="361" width="534.64306640625" height="33" rx="4" fill="#F5F8FB" stroke="#F5F8FB" stroke-width="0"/>
+<text x="550.0" y="386" font-family="DejaVu Sans" font-size="21" font-weight="normal" fill="#2563A0" text-anchor="middle">1  Append slices -&gt; A.ts (final name, written live)</text>
+<polyline points="300,480 800,480" fill="none" stroke="#2563A0" stroke-width="2.5" stroke-linejoin="round"/>
+<polygon points="800,480 789.0,485.0 789.0,475.0" fill="#2563A0"/>
+<rect x="308.385009765625" y="441" width="483.22998046875006" height="33" rx="4" fill="#F5F8FB" stroke="#F5F8FB" stroke-width="0"/>
+<text x="550.0" y="466" font-family="DejaVu Sans" font-size="21" font-weight="normal" fill="#2563A0" text-anchor="middle">2  At end_ts: fsync file + directory (still A.ts)</text>
+<polyline points="300,580 1300,580" fill="none" stroke="#147A6D" stroke-width="2.5" stroke-linejoin="round"/>
+<polygon points="1300,580 1289.0,585.0 1289.0,575.0" fill="#147A6D"/>
+<rect x="516.979736328125" y="541" width="566.04052734375" height="33" rx="4" fill="#F5F8FB" stroke="#F5F8FB" stroke-width="0"/>
+<text x="800.0" y="566" font-family="DejaVu Sans" font-size="21" font-weight="normal" fill="#147A6D" text-anchor="middle">3  Finalize -&gt; mark ready; save path + size + codec</text>
+<polyline points="1300,660 300,660" fill="none" stroke="#147A6D" stroke-width="2.5" stroke-linejoin="round"/>
+<polygon points="300,660 311.0,655.0 311.0,665.0" fill="#147A6D"/>
+<rect x="745.2060546875" y="621" width="109.587890625" height="33" rx="4" fill="#F5F8FB" stroke="#F5F8FB" stroke-width="0"/>
+<text x="800.0" y="646" font-family="DejaVu Sans" font-size="21" font-weight="normal" fill="#147A6D" text-anchor="middle">4  Saved</text>
+<rect x="1062" y="728" width="476" height="69" rx="12" fill="#E9F6F2" stroke="#147A6D" stroke-width="1.5"/>
+<text x="1300" y="771" font-family="DejaVu Sans" font-size="24" font-weight="bold" fill="#147A6D" text-anchor="middle">READY FOR REPLAY</text>
+<polyline points="1300,671 1300,728" fill="none" stroke="#147A6D" stroke-width="2.5" stroke-linejoin="round"/>
+<polygon points="1300,728 1295.0,717.0 1305.0,717.0" fill="#147A6D"/>
+<rect x="48" y="915" width="477" height="112" rx="12" fill="#FFF4E2" stroke="#D2DDE7" stroke-width="1.5"/>
+<rect x="48" y="915" width="5" height="112" rx="2" fill="#9A6316" stroke="#9A6316" stroke-width="0"/>
+<text x="70" y="950" font-family="DejaVu Sans" font-size="20" font-weight="bold" fill="#9A6316" text-anchor="start">Write fails</text>
+<text x="70" y="984" font-family="DejaVu Sans" font-size="21" font-weight="normal" fill="#193449" text-anchor="start">Mark failed; delete recording directory.</text>
+<rect x="562" y="915" width="477" height="112" rx="12" fill="#FFF4E2" stroke="#D2DDE7" stroke-width="1.5"/>
+<rect x="562" y="915" width="5" height="112" rx="2" fill="#9A6316" stroke="#9A6316" stroke-width="0"/>
+<text x="584" y="950" font-family="DejaVu Sans" font-size="20" font-weight="bold" fill="#9A6316" text-anchor="start">Restart</text>
+<text x="584" y="984" font-family="DejaVu Sans" font-size="21" font-weight="normal" fill="#193449" text-anchor="start">Scan DB for stuck rows;</text>
+<text x="584" y="1011" font-family="DejaVu Sans" font-size="21" font-weight="normal" fill="#193449" text-anchor="start">mark failed, delete.</text>
+<rect x="1076" y="915" width="476" height="112" rx="12" fill="#FFF4E2" stroke="#D2DDE7" stroke-width="1.5"/>
+<rect x="1076" y="915" width="5" height="112" rx="2" fill="#9A6316" stroke="#9A6316" stroke-width="0"/>
+<text x="1098" y="950" font-family="DejaVu Sans" font-size="20" font-weight="bold" fill="#9A6316" text-anchor="start">Disk limit reached</text>
+<text x="1098" y="984" font-family="DejaVu Sans" font-size="21" font-weight="normal" fill="#193449" text-anchor="start">Reject new work.</text>
+</svg>

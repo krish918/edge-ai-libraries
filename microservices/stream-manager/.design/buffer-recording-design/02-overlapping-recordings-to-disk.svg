@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-FileCopyrightText: (C) 2026 Intel Corporation -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1100" viewBox="0 0 1600 1100" role="img" aria-labelledby="title desc">
+<title id="title">Overlapping requests -&gt; separate disk files</title>
+<desc id="desc">Overlapping recording requests reserve historical slices and subscribe to future sequence numbers without a gap. Each recording worker produces a separate disk-backed temporary recording.</desc>
+<rect x="0" y="0" width="1600" height="1100" rx="0" fill="#F5F8FB" stroke="#F5F8FB" stroke-width="1.5"/>
+<rect x="48" y="35" width="7" height="94" rx="2" fill="#147A6D" stroke="#147A6D" stroke-width="1.5"/>
+<text x="74" y="72" font-family="DejaVu Sans" font-size="32" font-weight="bold" fill="#193449" text-anchor="start">Recording strategy - High level Design</text>
+<text x="74" y="116" font-family="DejaVu Sans" font-size="25" font-weight="bold" fill="#2563A0" text-anchor="start">02 / Overlapping requests -&gt; separate disk files</text>
+<text x="1552" y="54" font-family="DejaVu Sans" font-size="14" font-weight="normal" fill="#53677B" text-anchor="end">PROPOSED</text>
+<polyline points="48,1048 1552,1048" fill="none" stroke="#D2DDE7" stroke-width="1" stroke-linejoin="round"/>
+<text x="48" y="1075" font-family="DejaVu Sans" font-size="13" font-weight="normal" fill="#53677B" text-anchor="start">(C) 2026 Intel Corporation  |  SPDX-License-Identifier: Apache-2.0</text>
+<text x="1552" y="1075" font-family="DejaVu Sans" font-size="15" font-weight="normal" fill="#53677B" text-anchor="end">02 / 03</text>
+<rect x="48" y="163" width="731" height="98" rx="12" fill="#EAF2FC" stroke="#D2DDE7" stroke-width="1.5"/>
+<rect x="48" y="163" width="5" height="98" rx="2" fill="#2563A0" stroke="#2563A0" stroke-width="0"/>
+<circle cx="78" cy="191" r="14" fill="#2563A0"/>
+<text x="78" y="196" font-family="DejaVu Sans" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">A</text>
+<text x="102" y="198" font-family="DejaVu Sans" font-size="20" font-weight="bold" fill="#2563A0" text-anchor="start">Request A</text>
+<text x="70" y="232" font-family="DejaVu Sans" font-size="18" font-weight="normal" fill="#193449" text-anchor="start">12:01:20 -&gt; 12:02:10</text>
+<rect x="821" y="163" width="731" height="98" rx="12" fill="#E9F6F2" stroke="#D2DDE7" stroke-width="1.5"/>
+<rect x="821" y="163" width="5" height="98" rx="2" fill="#147A6D" stroke="#147A6D" stroke-width="0"/>
+<circle cx="851" cy="191" r="14" fill="#147A6D"/>
+<text x="851" y="196" font-family="DejaVu Sans" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">B</text>
+<text x="875" y="198" font-family="DejaVu Sans" font-size="20" font-weight="bold" fill="#147A6D" text-anchor="start">Request B</text>
+<text x="843" y="232" font-family="DejaVu Sans" font-size="18" font-weight="normal" fill="#193449" text-anchor="start">12:01:30 -&gt; 12:02:20</text>
+<polyline points="48,210 28,210 28,442 170,442 170,468" fill="none" stroke="#2563A0" stroke-width="2.5" stroke-linejoin="round"/>
+<polygon points="170,468 165.0,457.0 175.0,457.0" fill="#2563A0"/>
+<polyline points="1552,210 1572,210 1572,442 1430,442 1430,468" fill="none" stroke="#147A6D" stroke-width="2.5" stroke-linejoin="round"/>
+<polygon points="1430,468 1425.0,457.0 1435.0,457.0" fill="#147A6D"/>
+<text x="230" y="301" font-family="DejaVu Sans" font-size="16" font-weight="normal" fill="#53677B" text-anchor="middle">12:01:20</text>
+<polyline points="230,312 230,396" fill="none" stroke="#D2DDE7" stroke-width="1" stroke-linejoin="round"/>
+<text x="420" y="301" font-family="DejaVu Sans" font-size="16" font-weight="normal" fill="#53677B" text-anchor="middle">12:01:30</text>
+<polyline points="420,312 420,396" fill="none" stroke="#D2DDE7" stroke-width="1" stroke-linejoin="round"/>
+<text x="610" y="301" font-family="DejaVu Sans" font-size="16" font-weight="normal" fill="#53677B" text-anchor="middle">12:01:40</text>
+<polyline points="610,312 610,396" fill="none" stroke="#D2DDE7" stroke-width="1" stroke-linejoin="round"/>
+<text x="800" y="301" font-family="DejaVu Sans" font-size="16" font-weight="normal" fill="#53677B" text-anchor="middle">12:01:50</text>
+<polyline points="800,312 800,396" fill="none" stroke="#D2DDE7" stroke-width="1" stroke-linejoin="round"/>
+<text x="990" y="301" font-family="DejaVu Sans" font-size="16" font-weight="normal" fill="#53677B" text-anchor="middle">12:02:00</text>
+<polyline points="990,312 990,396" fill="none" stroke="#D2DDE7" stroke-width="1" stroke-linejoin="round"/>
+<text x="1180" y="301" font-family="DejaVu Sans" font-size="16" font-weight="normal" fill="#53677B" text-anchor="middle">12:02:10</text>
+<polyline points="1180,312 1180,396" fill="none" stroke="#D2DDE7" stroke-width="1" stroke-linejoin="round"/>
+<text x="1370" y="301" font-family="DejaVu Sans" font-size="16" font-weight="normal" fill="#53677B" text-anchor="middle">12:02:20</text>
+<polyline points="1370,312 1370,396" fill="none" stroke="#D2DDE7" stroke-width="1" stroke-linejoin="round"/>
+<text x="74" y="346" font-family="DejaVu Sans" font-size="20" font-weight="bold" fill="#2563A0" text-anchor="start">A</text>
+<text x="74" y="387" font-family="DejaVu Sans" font-size="20" font-weight="bold" fill="#147A6D" text-anchor="start">B</text>
+<rect x="230" y="324" width="950" height="28" rx="5" fill="#EAF2FC" stroke="#2563A0" stroke-width="1.5"/>
+<rect x="420" y="366" width="950" height="28" rx="5" fill="#E9F6F2" stroke="#147A6D" stroke-width="1.5"/>
+<polyline points="990,308 990,409" fill="none" stroke="#9A6316" stroke-width="2.5" stroke-linejoin="round" stroke-dasharray="7 6"/>
+<text x="600" y="344" font-family="DejaVu Sans" font-size="16" font-weight="normal" fill="#2563A0" text-anchor="middle">already buffered</text>
+<text x="1085" y="344" font-family="DejaVu Sans" font-size="16" font-weight="normal" fill="#2563A0" text-anchor="middle">new</text>
+<text x="700" y="387" font-family="DejaVu Sans" font-size="16" font-weight="normal" fill="#147A6D" text-anchor="middle">already buffered</text>
+<text x="1215" y="387" font-family="DejaVu Sans" font-size="16" font-weight="normal" fill="#147A6D" text-anchor="middle">arrives next</text>
+<rect x="936" y="411" width="108" height="34" rx="6" fill="#FFF4E2" stroke="#FFF4E2" stroke-width="0"/>
+<text x="990.0" y="434" font-family="DejaVu Sans" font-size="16" font-weight="bold" fill="#9A6316" text-anchor="middle">NOW</text>
+<rect x="48" y="468" width="1504" height="138" rx="12" fill="#FFFFFF" stroke="#D2DDE7" stroke-width="1.5"/>
+<rect x="48" y="468" width="5" height="138" rx="2" fill="#2563A0" stroke="#2563A0" stroke-width="0"/>
+<circle cx="78" cy="496" r="14" fill="#2563A0"/>
+<text x="78" y="501" font-family="DejaVu Sans" font-size="15" font-weight="bold" fill="#FFFFFF" text-anchor="middle">1</text>
+<text x="102" y="503" font-family="DejaVu Sans" font-size="20" font-weight="bold" fill="#2563A0" text-anchor="start">Recording manager</text>
+<text x="85" y="551" font-family="DejaVu Sans" font-size="22" font-weight="normal" fill="#193449" text-anchor="start">Check coverage + capacity</text>
+<polyline points="416,544 481,544" fill="none" stroke="#2563A0" stroke-width="2.5" stroke-linejoin="round"/>
+<polygon points="481,544 470.0,549.0 470.0,539.0" fill="#2563A0"/>
+<text x="510" y="551" font-family="DejaVu Sans" font-size="22" font-weight="normal" fill="#193449" text-anchor="start">Locate slice holding start_ts</text>
+<polyline points="851,544 916,544" fill="none" stroke="#2563A0" stroke-width="2.5" stroke-linejoin="round"/>
+<polygon points="916,544 905.0,549.0 905.0,539.0" fill="#2563A0"/>
+<text x="945" y="551" font-family="DejaVu Sans" font-size="22" font-weight="normal" fill="#193449" text-anchor="start">Reserve past + follow new slices</text>
+<text x="945" y="584" font-family="DejaVu Sans" font-size="18" font-weight="normal" fill="#53677B" text-anchor="start">One locked step; no missed slices.</text>
+<polyline points="800,606 800,624" fill="none" stroke="#2563A0" stroke-width="2.5" stroke-linejoin="round"/>
+<polygon points="800,624 795.0,613.0 805.0,613.0" fill="#2563A0"/>
+<rect x="425" y="624" width="750" height="94" rx="12" fill="#FFFFFF" stroke="#2563A0" stroke-width="1.5"/>
+<text x="800" y="657" font-family="DejaVu Sans" font-size="22" font-weight="bold" fill="#2563A0" text-anchor="middle">SHARED TMPFS FILES</text>
+<text x="800" y="687" font-family="DejaVu Sans" font-size="20" font-weight="normal" fill="#193449" text-anchor="middle">Past: ... S041 ... S060  |  New: S061 ...</text>
+<polyline points="610,718 610,741 400,741 400,768" fill="none" stroke="#2563A0" stroke-width="2.5" stroke-linejoin="round"/>
+<polygon points="400,768 395.0,757.0 405.0,757.0" fill="#2563A0"/>
+<polyline points="990,718 990,741 1190,741 1190,768" fill="none" stroke="#147A6D" stroke-width="2.5" stroke-linejoin="round"/>
+<polygon points="1190,768 1185.0,757.0 1195.0,757.0" fill="#147A6D"/>
+<rect x="48" y="768" width="731" height="149" rx="12" fill="#EAF2FC" stroke="#D2DDE7" stroke-width="1.5"/>
+<rect x="48" y="768" width="5" height="149" rx="2" fill="#2563A0" stroke="#2563A0" stroke-width="0"/>
+<text x="70" y="803" font-family="DejaVu Sans" font-size="20" font-weight="bold" fill="#2563A0" text-anchor="start">Recording worker A</text>
+<text x="70" y="837" font-family="DejaVu Sans" font-size="21" font-weight="normal" fill="#193449" text-anchor="start">Read S041-S060 -&gt; follow S061-S065</text>
+<text x="70" y="864" font-family="DejaVu Sans" font-size="21" font-weight="normal" fill="#193449" text-anchor="start">Append slice -&gt; release -&gt; finalize at end_ts</text>
+<rect x="821" y="768" width="731" height="149" rx="12" fill="#E9F6F2" stroke="#D2DDE7" stroke-width="1.5"/>
+<rect x="821" y="768" width="5" height="149" rx="2" fill="#147A6D" stroke="#147A6D" stroke-width="0"/>
+<text x="843" y="803" font-family="DejaVu Sans" font-size="20" font-weight="bold" fill="#147A6D" text-anchor="start">Recording worker B</text>
+<text x="843" y="837" font-family="DejaVu Sans" font-size="21" font-weight="normal" fill="#193449" text-anchor="start">Read S046-S060 -&gt; follow S061-S070</text>
+<text x="843" y="864" font-family="DejaVu Sans" font-size="21" font-weight="normal" fill="#193449" text-anchor="start">Append slice -&gt; release -&gt; finalize at end_ts</text>
+<polyline points="400,917 400,947" fill="none" stroke="#2563A0" stroke-width="2.5" stroke-linejoin="round"/>
+<polygon points="400,947 395.0,936.0 405.0,936.0" fill="#2563A0"/>
+<polyline points="1190,917 1190,947" fill="none" stroke="#147A6D" stroke-width="2.5" stroke-linejoin="round"/>
+<polygon points="1190,947 1185.0,936.0 1195.0,936.0" fill="#147A6D"/>
+<rect x="48" y="947" width="731" height="54" rx="12" fill="#FFFFFF" stroke="#2563A0" stroke-width="1.5"/>
+<rect x="821" y="947" width="731" height="54" rx="12" fill="#FFFFFF" stroke="#147A6D" stroke-width="1.5"/>
+<text x="413" y="981" font-family="DejaVu Sans" font-size="22" font-weight="bold" fill="#2563A0" text-anchor="middle">DISK: writes A.ts directly</text>
+<text x="1186" y="981" font-family="DejaVu Sans" font-size="22" font-weight="bold" fill="#147A6D" text-anchor="middle">DISK: writes B.ts directly</text>
+<text x="800" y="1030" font-family="DejaVu Sans" font-size="18" font-weight="normal" fill="#53677B" text-anchor="middle">TS slices join byte for byte; no re-encode.</text>
+</svg>
