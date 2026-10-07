@@ -14,43 +14,45 @@ import (
 )
 
 const (
-	DefaultHTTPAddr         = ":8080"
-	DefaultBufferLength     = 30 * time.Second
-	MaxBufferLength         = 300 * time.Second
-	MinBufferLength         = 5 * time.Second
-	DefaultRecordingStorage = 10240 // MegaBytes; ~10 GB
-	MinRecordingStorage     = 5120  // MegaBytes; ~5 GB
-	ConcurrentRecorders     = 10
+	DefaultHTTPAddr     = ":8080"
+	DefaultStorageDir   = "~/.local/share/stream-manager"
+	DefaultBufferDir    = "/dev/shm/stream-manager"
+	DefaultBufferLength = 30 * time.Second
+	MaxBufferLength     = 300 * time.Second
+	MinBufferLength     = 5 * time.Second
+	DefaultStorageSize  = 10240 // MegaBytes; ~10 GB
+	MinStorageSize      = 5120  // MegaBytes; ~5 GB
+	ConcurrentRecorders = 10
 )
 
 type Config struct {
-	HTTPAddr            string // Override using SM_HTTP_ADDR (default ":8080")
-	BufferLength        time.Duration
-	BufferDir           string
-	StorageDir          string
-	ConcurrentRecorders int
-	RecordingStorage    int // Override using SM_RECORDING_STORAGE (default 10240 MB)
+	HTTPAddr             string // Override using SM_HTTP_ADDR (default ":8080")
+	BufferLength         time.Duration
+	BufferDir            string
+	StorageDir           string
+	ConcurrentRecorders  int
+	RecordingStorageSize int // Override using SM_RECORDING_STORAGE (default 10240 MB)
 }
 
 // Load reads the configuration from the environment.
 func Load() (Config, error) {
 	cfg := Config{
-		HTTPAddr:            DefaultHTTPAddr,
-		BufferLength:        DefaultBufferLength,
-		BufferDir:           "/dev/shm/stream-manager",
-		StorageDir:          "~/.local/share/stream-manager",
-		ConcurrentRecorders: ConcurrentRecorders,
-		RecordingStorage:    DefaultRecordingStorage,
+		HTTPAddr:             DefaultHTTPAddr,
+		BufferLength:         DefaultBufferLength,
+		BufferDir:            DefaultBufferDir,
+		StorageDir:           DefaultStorageDir,
+		ConcurrentRecorders:  ConcurrentRecorders,
+		RecordingStorageSize: DefaultStorageSize,
 	}
 	if v := strings.TrimSpace(os.Getenv("SM_HTTP_ADDR")); v != "" {
 		cfg.HTTPAddr = v
 	}
 	if v := strings.TrimSpace(os.Getenv("SM_RECORDING_STORAGE")); v != "" {
 		n, err := strconv.Atoi(v)
-		if err != nil || n < MinRecordingStorage {
-			return Config{}, fmt.Errorf("SM_RECORDING_STORAGE must be an integer greater than or equal to %d", MinRecordingStorage)
+		if err != nil || n < MinStorageSize {
+			return Config{}, fmt.Errorf("SM_RECORDING_STORAGE must be an integer greater than or equal to %d", MinStorageSize)
 		}
-		cfg.RecordingStorage = n
+		cfg.RecordingStorageSize = n
 	}
 
 	if storageDir, err := expandHome(cfg.StorageDir); err == nil {

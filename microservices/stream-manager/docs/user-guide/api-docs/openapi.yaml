@@ -643,11 +643,11 @@ paths:
             type: number
         - name: format
           in: query
-          description: Clip format, mp4 (default), mkv or webm.
+          description: Clip format, mp4 (default). More formats to be supported in the future.
           required: false
           schema:
             type: string
-            enum: [mp4, mkv, webm]
+            enum: [mp4]
             default: mp4
       responses:
         '200':
@@ -670,14 +670,14 @@ paths:
               schema:
                 type: string
                 format: binary
-            video/x-matroska:
-              schema:
-                type: string
-                format: binary
-            video/webm:
-              schema:
-                type: string
-                format: binary
+            # video/x-matroska:
+            #   schema:
+            #     type: string
+            #     format: binary
+            # video/webm:
+            #   schema:
+            #     type: string
+            #     format: binary
         '400':
           description: Invalid range or both end selectors.
           content:
@@ -747,11 +747,11 @@ paths:
             type: number
         - name: format
           in: query
-          description: Clip format, mp4 (default), mkv or webm.
+          description: Clip format, mp4 (default). More formats to be supported in the future.
           required: false
           schema:
             type: string
-            enum: [mp4, mkv, webm]
+            enum: [mp4]
             default: mp4
       responses:
         '200':
