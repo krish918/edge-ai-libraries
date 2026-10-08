@@ -6,7 +6,7 @@ This guide shows how to attach an RTSP source, record video, and retrieve a fram
 
 - Go 1.26 or later.
 - FFmpeg and FFprobe on `PATH`.
-- `curl` and `jq` for the example commands.
+- `curl`, `jq`, `awk`, and `file` for the example commands.
 - A reachable RTSP source with one H.264 or H.265 video track.
 - A private temporary filesystem for the rolling buffer, normally `/dev/shm` on Linux.
 
@@ -187,13 +187,18 @@ jq -c 'select(has("ordinal")) | {ordinal, capture_ts, pts}' "$SIDECAR"
 mapfile -t SAMPLES < <(jq -r 'select(has("ordinal")) | .capture_ts' "$SIDECAR")
 (( ${#SAMPLES[@]} >= 3 )) || { echo 'need at least three indexed samples'; exit 1; }
 END_INDEX=$((${#SAMPLES[@]} - 2))
+START_SECONDS=$(date -u -d "${SAMPLES[0]}" +%s.%N)
+END_SECONDS=$(date -u -d "${SAMPLES[$END_INDEX]}" +%s.%N)
+CLIP_DURATION=$(awk -v start="$START_SECONDS" -v end="$END_SECONDS" \
+	'BEGIN { duration = end - start - 0.1; if (duration <= 0) exit 1; printf "%.3f", duration }') || \
+	{ echo 'selected samples are too close together for clip extraction'; exit 1; }
 
 curl -fsS -H 'Accept: image/jpeg' --get \
 	--data-urlencode "timestamp=${SAMPLES[0]}" --data-urlencode 'match=exact' \
 	-o frame.jpg "$BASE/v1/replays/$RECORDING_ID/frame"
 curl -fsS -H 'Accept: video/mp4' --get \
 	--data-urlencode "start_ts=${SAMPLES[0]}" \
-	--data-urlencode "end_ts=${SAMPLES[$END_INDEX]}" \
+	--data-urlencode "duration=$CLIP_DURATION" \
 	-o clip.mp4 "$BASE/v1/replays/$RECORDING_ID/clip"
 file frame.jpg clip.mp4
 ```
