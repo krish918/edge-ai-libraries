@@ -45,7 +45,7 @@ const (
 	MaxBufferLength         = 300 * time.Second
 	DefaultStorageSize      = 10240 // Megabytes
 	MinStorageSize          = 5120  // Megabytes
-	ConcurrentRecorders    = 10
+	ConcurrentRecorders     = 10
 	DefaultMaxActiveRecords = ConcurrentRecorders
 )
 
