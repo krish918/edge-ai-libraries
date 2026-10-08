@@ -85,16 +85,17 @@ func Middleware(base *slog.Logger) gin.HandlerFunc {
 		c.Next()
 
 		status := c.Writer.Status()
+		path := c.FullPath()
+		if path == "" {
+			path = "<unmatched>"
+		}
 		attrs := []any{
 			"method", c.Request.Method,
-			"path", c.Request.URL.Path,
+			"path", path,
 			"status", status,
 			"duration_ms", time.Since(start).Milliseconds(),
 			"bytes", c.Writer.Size(),
 			"client_ip", c.ClientIP(),
-		}
-		if q := c.Request.URL.RawQuery; q != "" {
-			attrs = append(attrs, "query", q)
 		}
 		if errs := c.Errors.ByType(gin.ErrorTypePrivate); len(errs) > 0 {
 			attrs = append(attrs, "error", errs.Last().Error())
