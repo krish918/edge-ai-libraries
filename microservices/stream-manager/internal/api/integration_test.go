@@ -200,7 +200,7 @@ func TestIntegrationClipEndpoints(t *testing.T) {
 	env := newIntegrationEnv(t)
 	start := fixtureBase.Add(1 * time.Second)
 
-	rr := env.do(t, clipPath(start, "&duration_seconds=2"), "video/mp4")
+	rr := env.do(t, clipPath(start, "&duration=2"), "video/mp4")
 	if rr.Code != http.StatusOK {
 		t.Fatalf("clip status %d: %s", rr.Code, rr.Body.String())
 	}
@@ -209,8 +209,8 @@ func TestIntegrationClipEndpoints(t *testing.T) {
 	}
 
 	end := start.Add(3 * time.Second)
-	rr = env.do(t, "/v1/replays/rec-001/clip/url?timestamp_start="+url.QueryEscape(start.Format(time.RFC3339Nano))+
-		"&timestamp_end="+url.QueryEscape(end.Format(time.RFC3339Nano)), "")
+	rr = env.do(t, "/v1/replays/rec-001/clip/url?start_ts="+url.QueryEscape(start.Format(time.RFC3339Nano))+
+		"&end_ts="+url.QueryEscape(end.Format(time.RFC3339Nano)), "")
 	result := decodeResult(t, rr)
 	if result.ContentType != "video/mp4" || result.EndTS == nil || !result.EndTS.Equal(end) {
 		t.Fatalf("clip/url result = %+v", result)

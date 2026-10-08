@@ -5,8 +5,6 @@ package handler
 
 import (
 	"errors"
-	"fmt"
-	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -14,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/open-edge-platform/edge-ai-libraries/microservices/stream-manager/internal/api/common"
 	"github.com/open-edge-platform/edge-ai-libraries/microservices/stream-manager/internal/model"
 	"github.com/open-edge-platform/edge-ai-libraries/microservices/stream-manager/internal/replay"
 	"github.com/open-edge-platform/edge-ai-libraries/microservices/stream-manager/internal/storage"
@@ -52,29 +51,22 @@ func (h *RetrievalHandler) GetClipURL(c *gin.Context) {
 }
 
 func (h *RetrievalHandler) handleFrame(c *gin.Context, forceJSON bool) {
-	recordingID := c.Param("recording_id")
-	if strings.TrimSpace(recordingID) == "" {
-		h.writeError(c, http.StatusBadRequest, "invalid_request", "missing recording_id")
-		return
-	}
-
-	startTS, err := parseTimestamp(c, "timestamp")
-	if err != nil {
-		h.writeError(c, http.StatusBadRequest, "invalid_timestamp", err.Error())
-		return
-	}
-
-	format := c.Query("format")
-	if !h.negotiate(c, forceJSON, format, replay.FrameContentType, acceptsFrameBinary, "accept header is incompatible with the requested frame format") {
-		return
-	}
-
-	result, err := h.service.GetFrame(c.Request.Context(), model.FrameRequest{
-		RecordingID: recordingID,
-		StartTS:     startTS,
-		Format:      format,
+	request, code, err := (frameQuery{
+		RecordingID: c.Param("recording_id"),
+		Timestamp:   c.Query("timestamp"),
+		Format:      c.Query("format"),
 		Match:       c.Query("match"),
-	})
+	}).validate()
+	if err != nil {
+		common.WriteError(c, http.StatusBadRequest, code, err.Error())
+		return
+	}
+
+	if !h.negotiate(c, forceJSON, request.Format, replay.FrameContentType, acceptsFrameBinary, "accept header is incompatible with the requested frame format") {
+		return
+	}
+
+	result, err := h.service.GetFrame(c.Request.Context(), request)
 	if err != nil {
 		h.writeServiceError(c, err)
 		return
@@ -84,63 +76,22 @@ func (h *RetrievalHandler) handleFrame(c *gin.Context, forceJSON bool) {
 }
 
 func (h *RetrievalHandler) handleClip(c *gin.Context, forceJSON bool) {
-	recordingID := c.Param("recording_id")
-	if strings.TrimSpace(recordingID) == "" {
-		h.writeError(c, http.StatusBadRequest, "invalid_request", "missing recording_id")
-		return
-	}
-
-	startTS, err := parseTimestamp(c, "timestamp_start")
+	request, code, err := (clipQuery{
+		RecordingID: c.Param("recording_id"),
+		StartTS:     c.Query("start_ts"),
+		EndTS:       c.Query("end_ts"),
+		Duration:    c.Query("duration"),
+		Format:      c.Query("format"),
+	}).validate()
 	if err != nil {
-		h.writeError(c, http.StatusBadRequest, "invalid_timestamp", err.Error())
+		common.WriteError(c, http.StatusBadRequest, code, err.Error())
+		return
+	}
+	if !h.negotiate(c, forceJSON, request.Format, replay.ClipContentType, acceptsClipBinary, "accept header is incompatible with the requested clip format") {
 		return
 	}
 
-	endValue, durationValue := c.Query("timestamp_end"), c.Query("duration_seconds")
-	endProvided := endValue != ""
-	durationProvided := durationValue != ""
-	if endProvided == durationProvided {
-		if endProvided {
-			h.writeError(c, http.StatusBadRequest, "invalid_request", "provide exactly one of timestamp_end or duration_seconds")
-		} else {
-			h.writeError(c, http.StatusBadRequest, "invalid_request", "missing clip end boundary")
-		}
-		return
-	}
-
-	var endTS *time.Time
-	if endProvided {
-		parsed, err := time.Parse(time.RFC3339Nano, endValue)
-		if err != nil {
-			h.writeError(c, http.StatusBadRequest, "invalid_timestamp", "timestamp_end must be RFC3339Nano")
-			return
-		}
-		utc := parsed.UTC()
-		endTS = &utc
-	}
-
-	var clipDuration *float64
-	if durationProvided {
-		parsed, err := parseDurationSeconds(durationValue)
-		if err != nil {
-			h.writeError(c, http.StatusBadRequest, "invalid_duration", err.Error())
-			return
-		}
-		clipDuration = &parsed
-	}
-
-	format := c.Query("format")
-	if !h.negotiate(c, forceJSON, format, replay.ClipContentType, acceptsClipBinary, "accept header is incompatible with the requested clip format") {
-		return
-	}
-
-	result, err := h.service.GetClip(c.Request.Context(), model.ClipRequest{
-		RecordingID:  recordingID,
-		StartTS:      startTS,
-		EndTS:        endTS,
-		ClipDuration: clipDuration,
-		Format:       format,
-	})
+	result, err := h.service.GetClip(c.Request.Context(), request)
 	if err != nil {
 		h.writeServiceError(c, err)
 		return
@@ -166,7 +117,7 @@ func (h *RetrievalHandler) negotiate(c *gin.Context, forceJSON bool, format stri
 	if acceptsBinary(accept, contentType) || acceptsJSON(accept) {
 		return true
 	}
-	h.writeError(c, http.StatusNotAcceptable, "not_acceptable", incompatibleDetail)
+	common.WriteError(c, http.StatusNotAcceptable, "not_acceptable", incompatibleDetail)
 	return false
 }
 
@@ -182,32 +133,6 @@ func (h *RetrievalHandler) respond(c *gin.Context, result model.MediaResult, for
 	writeMediaResult(c, result)
 }
 
-func parseTimestamp(c *gin.Context, key string) (time.Time, error) {
-	value := c.Query(key)
-	if value == "" {
-		return time.Time{}, fmt.Errorf("missing %s parameter", key)
-	}
-	parsed, err := time.Parse(time.RFC3339Nano, value)
-	if err != nil {
-		return time.Time{}, fmt.Errorf("%s must be RFC3339Nano", key)
-	}
-	return parsed.UTC(), nil
-}
-
-func parseDurationSeconds(value string) (float64, error) {
-	parsed, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
-	if err != nil {
-		return 0, errors.New("duration_seconds must be a number")
-	}
-	if math.IsNaN(parsed) || math.IsInf(parsed, 0) {
-		return 0, errors.New("duration_seconds must be finite")
-	}
-	if parsed <= 0 {
-		return 0, errors.New("duration_seconds must be greater than zero")
-	}
-	return parsed, nil
-}
-
 // writeMediaResult writes a MediaResult (the JSON alternative to raw frame
 // or clip bytes). Per the API contract this response is never cached, same
 // as the binary alternative.
@@ -219,7 +144,7 @@ func writeMediaResult(c *gin.Context, result model.MediaResult) {
 func (h *RetrievalHandler) writeBinary(c *gin.Context, result model.MediaResult) {
 	reader, err := h.media.OpenDerived(c.Request.Context(), result.DerivedKey)
 	if err != nil {
-		h.writeError(c, http.StatusServiceUnavailable, "storage_unavailable", "failed to read derived media")
+		common.WriteError(c, http.StatusServiceUnavailable, "storage_unavailable", "failed to read derived media")
 		return
 	}
 	defer reader.Close()
@@ -271,42 +196,33 @@ func acceptsClipBinary(accept, contentType string) bool {
 		strings.Contains(accept, "application/octet-stream")
 }
 
-func (h *RetrievalHandler) writeError(c *gin.Context, status int, code, details string) {
-	c.JSON(status, model.ErrorResponse{Status: status, ErrorCode: code, ErrorDetails: details})
-}
-
-// writeServiceError maps a RetrievalService error to the HTTP status and
-// error_code the API contract requires. error_details is always a short,
-// generic phrase: it must never leak file paths, storage addresses,
-// credentials, or media-tooling output, so lower-level error strings (e.g.
-// from the extractor or object store) are intentionally not echoed back to
-// the caller. The full error is attached to the Gin context so the access
-// log records it.
+// writeServiceError maps retrieval failures to the API envelope. It returns
+// generic details to clients and attaches the underlying error for access logs.
 func (h *RetrievalHandler) writeServiceError(c *gin.Context, err error) {
 	_ = c.Error(err)
 	switch {
 	case errors.Is(err, storage.ErrRecordingNotFound):
-		h.writeError(c, http.StatusNotFound, "recording_not_found", "recording not found")
+		common.WriteError(c, http.StatusNotFound, "recording_not_found", "recording not found")
 	case errors.Is(err, storage.ErrInvalidIdentifier), errors.Is(err, storage.ErrInvalidObjectKey):
-		h.writeError(c, http.StatusBadRequest, "invalid_request", "invalid recording identifier")
+		common.WriteError(c, http.StatusBadRequest, "invalid_request", "invalid recording identifier")
 	case errors.Is(err, replay.ErrRecordingNotReady):
-		h.writeError(c, http.StatusConflict, "recording_not_ready", "recording is not ready for retrieval")
+		common.WriteError(c, http.StatusConflict, "recording_not_ready", "recording is not ready for retrieval")
 	case errors.Is(err, replay.ErrUnsupportedFrameFormat):
-		h.writeError(c, http.StatusUnsupportedMediaType, "unsupported_media", "unsupported frame format")
+		common.WriteError(c, http.StatusUnsupportedMediaType, "unsupported_media", "unsupported frame format")
 	case errors.Is(err, replay.ErrUnsupportedClipFormat):
-		h.writeError(c, http.StatusUnsupportedMediaType, "unsupported_media", "unsupported clip format")
+		common.WriteError(c, http.StatusUnsupportedMediaType, "unsupported_media", "unsupported clip format")
 	case errors.Is(err, replay.ErrUnsupportedMatchMode):
-		h.writeError(c, http.StatusBadRequest, "invalid_request", "unsupported match mode")
+		common.WriteError(c, http.StatusBadRequest, "invalid_request", "unsupported match mode")
 	case errors.Is(err, replay.ErrInvalidClipRange):
-		h.writeError(c, http.StatusBadRequest, "invalid_request", "invalid clip range")
+		common.WriteError(c, http.StatusBadRequest, "invalid_request", "invalid clip range")
 	case errors.Is(err, replay.ErrNoExactMatch):
-		h.writeError(c, http.StatusNotFound, "frame_not_found", "no frame sits exactly at the requested timestamp")
+		common.WriteError(c, http.StatusNotFound, "frame_not_found", "no frame sits exactly at the requested timestamp")
 	case errors.Is(err, replay.ErrTimestampOutOfCoverage):
-		h.writeError(c, http.StatusNotFound, "timestamp_out_of_coverage", "requested timestamp falls outside the recording's stored coverage")
+		common.WriteError(c, http.StatusNotFound, "timestamp_out_of_coverage", "requested timestamp falls outside the recording's stored coverage")
 	case errors.Is(err, replay.ErrClipIntervalNotCovered):
-		h.writeError(c, http.StatusNotFound, "interval_not_covered", "the requested clip interval is not fully covered by the recording")
+		common.WriteError(c, http.StatusNotFound, "interval_not_covered", "the requested clip interval is not fully covered by the recording")
 	case errors.Is(err, replay.ErrSidecarUnavailable):
-		h.writeError(c, http.StatusServiceUnavailable, "storage_unavailable", "media index is not available")
+		common.WriteError(c, http.StatusServiceUnavailable, "storage_unavailable", "media index is not available")
 	case errors.Is(err, replay.ErrSidecarMalformed),
 		errors.Is(err, replay.ErrSidecarUnsupported),
 		errors.Is(err, replay.ErrSidecarEmpty),
@@ -315,16 +231,16 @@ func (h *RetrievalHandler) writeServiceError(c *gin.Context, err error) {
 		errors.Is(err, replay.ErrSidecarDuplicateSample),
 		errors.Is(err, replay.ErrSidecarUnordered),
 		errors.Is(err, replay.ErrSidecarMismatch):
-		h.writeError(c, http.StatusUnprocessableEntity, "invalid_media_index", "the recording's media index is invalid")
+		common.WriteError(c, http.StatusUnprocessableEntity, "invalid_media_index", "the recording's media index is invalid")
 	case errors.Is(err, replay.ErrMediaUnavailable):
-		h.writeError(c, http.StatusServiceUnavailable, "storage_unavailable", "media storage is not available")
+		common.WriteError(c, http.StatusServiceUnavailable, "storage_unavailable", "media storage is not available")
 	case errors.Is(err, replay.ErrRecordingTooLarge):
-		h.writeError(c, http.StatusRequestEntityTooLarge, "recording_too_large", "recording exceeds the maximum size this service can extract from")
+		common.WriteError(c, http.StatusRequestEntityTooLarge, "recording_too_large", "recording exceeds the maximum size this service can extract from")
 	case errors.Is(err, replay.ErrRecordingSizeUnknown):
-		h.writeError(c, http.StatusConflict, "recording_size_unknown", "recording size is unavailable for safe extraction")
+		common.WriteError(c, http.StatusConflict, "recording_size_unknown", "recording size is unavailable for safe extraction")
 	case errors.Is(err, replay.ErrExtractionFailed):
-		h.writeError(c, http.StatusServiceUnavailable, "extraction_failed", "media extraction failed")
+		common.WriteError(c, http.StatusServiceUnavailable, "extraction_failed", "media extraction failed")
 	default:
-		h.writeError(c, http.StatusInternalServerError, "internal_error", "internal error")
+		common.WriteInternalError(c)
 	}
 }

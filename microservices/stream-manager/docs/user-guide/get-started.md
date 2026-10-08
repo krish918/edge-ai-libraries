@@ -12,6 +12,65 @@ This guide shows how to attach an RTSP source, record video, and retrieve a fram
 
 The RTSP client uses TCP. Audio is ignored. The source URL must not contain a username or password.
 
+## Configuration reference
+
+The API server reads these settings from its environment. The root `.env.example` contains only
+Docker Compose overrides; it is not a complete application configuration file.
+
+### Service and metadata
+
+| Variable | Default or requirement | Purpose |
+|---|---|---|
+| `STREAM_MANAGER_PORT` | `18080` | HTTP listen port. |
+| `STREAM_MANAGER_VERSION` | `0.1.0` | Value returned by `GET /v1/version`. |
+| `STREAM_MANAGER_SQLITE_PATH` | `/var/lib/stream-manager/stream-manager.db` | Absolute path to SQLite metadata; required with either media backend. |
+| `STREAM_MANAGER_STORAGE_BACKEND` | `filesystem` | Choose `filesystem` or `s3`. Live stream and recording routes require `filesystem`; S3 supports retrieval of archived recordings. |
+
+### Filesystem media
+
+These settings apply when `STREAM_MANAGER_STORAGE_BACKEND=filesystem`:
+
+| Variable | Default or requirement | Purpose |
+|---|---|---|
+| `STREAM_MANAGER_FS_ROOT` | Required | Absolute root for recording and derived media. Use persistent storage. |
+| `STREAM_MANAGER_PUBLIC_BASE_URL` | Required | Public service base URL used to create media links. |
+| `STREAM_MANAGER_MEDIA_TOKEN_SECRET` | Required | Secret used to sign filesystem `/v1/media/{token}` capability links. |
+| `STREAM_MANAGER_FS_MAX_STAGE_BYTES` | `2147483648` (2 GiB) | Maximum source size staged for extraction. Must be positive. |
+
+### S3 media
+
+These settings apply when `STREAM_MANAGER_STORAGE_BACKEND=s3`. S3 supports archived-media retrieval;
+live stream and recording routes remain filesystem-only.
+
+| Variable | Default or requirement | Purpose |
+|---|---|---|
+| `STREAM_MANAGER_S3_ENDPOINT` | Required | S3-compatible service endpoint. |
+| `STREAM_MANAGER_S3_REGION` | `us-east-1` | S3 signing region. |
+| `STREAM_MANAGER_S3_BUCKET` | `stream-manager` | Existing bucket; the service does not create it. |
+| `STREAM_MANAGER_S3_PREFIX` | Empty | Optional object-key namespace within the bucket. |
+| `STREAM_MANAGER_S3_USE_PATH_STYLE` | `true` | Use `/{bucket}/{key}` addressing, as required by some S3-compatible services. |
+| `STREAM_MANAGER_S3_ACCESS_KEY` and `STREAM_MANAGER_S3_SECRET_KEY` | Optional; set together | Static S3 credentials. If omitted, the AWS default credential chain is used. |
+| `STREAM_MANAGER_S3_SESSION_TOKEN` | Empty | Optional session token for temporary static credentials. |
+| `STREAM_MANAGER_MEDIA_TOKEN_SECRET` | Optional | S3 normally returns direct presigned URLs; this configures the service media-token verifier if capability URLs are used. |
+
+### Streams and recordings
+
+| Variable | Default or requirement | Purpose |
+|---|---|---|
+| `STREAM_MANAGER_BUFFER_DIR` | `/dev/shm/stream-manager` | Private tmpfs directory for rolling stream buffers; must be owned by the service account with mode `0700`. |
+| `STREAM_MANAGER_BUFFER_LENGTH` | `30s`; range `5s` to `5m` | Default rolling-buffer window. Use a Go duration such as `45s` or `2m`. |
+| `STREAM_MANAGER_MAX_ACTIVE_RECORDS` | `32` | Maximum concurrent recording workers; must be positive. |
+| `STREAM_MANAGER_DEV_BEST_EFFORT_TIMESTAMPS` | `false` | Development-only fallback when a source has no usable RTCP/NTP mapping. |
+
+### Replay and logging
+
+| Variable | Default or requirement | Purpose |
+|---|---|---|
+| `STREAM_MANAGER_DERIVED_TTL` | `15m` | Retention hint for derived frames and clips. |
+| `STREAM_MANAGER_PRESIGN_EXPIRY` | `5m` | Lifetime of generated media URLs. |
+| `STREAM_MANAGER_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, or `error`. |
+| `STREAM_MANAGER_LOG_FORMAT` | `json` | `json` or `text`. |
+
 ## Configure and start
 
 Live stream and recording routes require the filesystem backend. Use absolute paths on persistent
@@ -35,7 +94,9 @@ export STREAM_MANAGER_MAX_ACTIVE_RECORDS=8
 ```
 
 For a service deployment, provision `/var/lib/stream-manager` on persistent storage and make it
-owned by the service account before startup. Set `STREAM_MANAGER_FS_ROOT` to
+owned by the service account before startup. The service restricts the filesystem media root to
+mode `0700`; the SQLite database and both lock files use mode `0600`. Run only one service process per
+SQLite database path or filesystem media root because process locks reject concurrent openers. Set `STREAM_MANAGER_FS_ROOT` to
 `/var/lib/stream-manager/media` and `STREAM_MANAGER_SQLITE_PATH` to
 `/var/lib/stream-manager/stream-manager.db`. The service rejects relative database and filesystem
 media paths. It cannot determine whether an absolute path is persistent; the deployment must mount
@@ -100,7 +161,7 @@ coverage for the requested start time.
 ```bash
 START_TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 RECORD_JSON=$(curl -fsS -H 'Content-Type: application/json' \
-	-d "{\"stream_ids\":[\"$STREAM_ID\"],\"start_ts\":\"$START_TS\",\"duration\":10,\"pre_event_duration\":0}" \
+	-d "{\"stream_id\":\"$STREAM_ID\",\"start_ts\":\"$START_TS\",\"duration\":10,\"pre_event_duration\":0}" \
 	"$BASE/v1/records/start")
 RECORDING_ID=$(printf '%s' "$RECORD_JSON" | jq -r '.recordings[0].recording_id')
 printf '%s\n' "$RECORD_JSON" | jq
@@ -143,8 +204,8 @@ curl -fsS -H 'Accept: image/jpeg' --get \
 	--data-urlencode "timestamp=${SAMPLES[0]}" --data-urlencode 'match=exact' \
 	-o frame.jpg "$BASE/v1/replays/$RECORDING_ID/frame"
 curl -fsS -H 'Accept: video/mp4' --get \
-	--data-urlencode "timestamp_start=${SAMPLES[0]}" \
-	--data-urlencode "timestamp_end=${SAMPLES[$END_INDEX]}" \
+	--data-urlencode "start_ts=${SAMPLES[0]}" \
+	--data-urlencode "end_ts=${SAMPLES[$END_INDEX]}" \
 	-o clip.mp4 "$BASE/v1/replays/$RECORDING_ID/clip"
 file frame.jpg clip.mp4
 ```

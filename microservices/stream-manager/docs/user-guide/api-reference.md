@@ -7,7 +7,7 @@ For a working RTSP example, see [Get Started](get-started.md).
 
 ## Common rules
 
-- Timestamps use RFC 3339. Stream and recording lifecycle timestamps must be UTC and end in `Z`.
+- API timestamps use RFC 3339 UTC and must end in `Z` (for example, `2026-10-07T12:30:00Z`).
 - JSON request bodies must contain one object. Unknown fields are rejected.
 - Errors use this shape:
 
@@ -15,7 +15,7 @@ For a working RTSP example, see [Get Started](get-started.md).
 {
   "status": 400,
   "error_code": "invalid_request",
-  "error_details": "request details"
+  "error_detail": "request details"
 }
 ```
 
@@ -66,7 +66,8 @@ and `creation_ts`. A new stream starts as `connecting`; it must reach `buffering
 {"buffer_length": 30}
 ```
 
-`buffer_length` is an integer number of seconds from 1 through 300.
+`buffer_length` is an optional integer number of seconds from 5 through 300. When omitted, the
+service uses `STREAM_MANAGER_BUFFER_LENGTH` (30 seconds by default).
 
 `DELETE /v1/streams/{stream_id}` detaches the source. The service returns `409 active_dependency`
 if a recording still uses the buffer.
@@ -78,12 +79,11 @@ Recording routes require `STREAM_MANAGER_STORAGE_BACKEND=filesystem`. With S3 se
 
 ### Start a recording
 
-`POST /v1/records/start` starts one or more recordings. Select streams by `stream_ids` or sensors by
-`sensor_ids`, but do not send both.
+`POST /v1/records/start` starts a recording for one attached stream. Send its `stream_id`.
 
 ```json
 {
-  "stream_ids": ["stream-id"],
+  "stream_id": "stream-id",
   "start_ts": "2026-10-05T12:00:00Z",
   "duration": 10,
   "pre_event_duration": 0,
@@ -97,11 +97,11 @@ Recording routes require `STREAM_MANAGER_STORAGE_BACKEND=filesystem`. With S3 se
   the service records a fixed interval.
 - Omit `duration` to record until a stop request.
 - `pre_event_duration` defaults to zero and can be from 0 through 300 seconds.
-- Each selector array must contain 1 through 32 unique IDs.
 - `metadata` is optional user-defined JSON metadata.
 
-Success returns `201 Created` with a `recordings` array. Each recording has an ID and starts in the
-`recording` state. A completed recording reaches `ready`; a failed recording reaches `failed`.
+Success returns `201 Created` with a `recordings` array containing one item. The recording has an ID
+and starts in the `recording` state. A completed recording reaches `ready`; a failed recording
+reaches `failed`.
 
 ### Stop a recording
 
@@ -164,9 +164,9 @@ regardless of `Accept`.
 
 | Query parameter | Required | Values |
 |---|---|---|
-| `timestamp_start` | Yes | RFC 3339 start time. |
-| `timestamp_end` | Exactly one end value | RFC 3339 end time. |
-| `duration_seconds` | Exactly one end value | A finite number greater than zero. |
+| `start_ts` | Yes | RFC 3339 start time. |
+| `end_ts` | Exactly one of `end_ts` or `duration` | RFC 3339 end time (exclusive). |
+| `duration` | Exactly one of `end_ts` or `duration` | A finite number greater than zero, in seconds. |
 | `format` | No | `mp4` (default). |
 
 Send `Accept: video/mp4`, `video/*`, or `application/octet-stream` to receive MP4 bytes. Otherwise,

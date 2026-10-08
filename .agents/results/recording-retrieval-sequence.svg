@@ -1,0 +1,51 @@
+<!-- SPDX-FileCopyrightText: (C) 2026 Intel Corporation -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1320" height="1080" viewBox="0 0 1320 1080" role="img" aria-labelledby="title desc">
+  <title id="title">Stream Manager recording and retrieval sequence</title>
+  <desc id="desc">Sequence diagram showing the HTTP client, Gin handlers, stream and recording services, RTSP source, rolling buffer, media store, SQLite, replay service, resolver, and FFmpeg during stream attachment, recording, and later retrieval.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8 Z" fill="#315f78"/></marker>
+    <marker id="arrow-green" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8 Z" fill="#176b56"/></marker>
+    <style>.head{stroke-width:2;rx:8}.name{font:700 15px Arial,sans-serif;fill:#202b32}.note{font:13px Arial,sans-serif;fill:#34464e}.life{stroke:#95a4a4;stroke-width:1.5;stroke-dasharray:6 6}.call{fill:none;stroke:#315f78;stroke-width:2;marker-end:url(#arrow)}.data{fill:none;stroke:#176b56;stroke-width:2;marker-end:url(#arrow-green)}.return{fill:none;stroke:#6d7b80;stroke-width:1.6;stroke-dasharray:5 4;marker-end:url(#arrow)}.label{font:13px Arial,sans-serif;fill:#202b32}.phase{font:700 14px Arial,sans-serif;fill:#176b56}.rule{stroke:#cbd5d1;stroke-width:1;stroke-dasharray:4 5}</style>
+  </defs>
+  <rect width="1320" height="1080" fill="#f5f6f3"/><text x="40" y="34" class="phase">DETAILED SEQUENCE: ATTACH, RECORD, THEN RETRIEVE</text>
+  <g>
+    <rect class="head" x="20" y="58" width="125" height="74" fill="#fff" stroke="#315f78"/><text class="name" x="82" y="88" text-anchor="middle">HTTP</text><text class="name" x="82" y="108" text-anchor="middle">client</text>
+    <rect class="head" x="160" y="58" width="125" height="74" fill="#e8f0f4" stroke="#315f78"/><text class="name" x="222" y="88" text-anchor="middle">Gin</text><text class="name" x="222" y="108" text-anchor="middle">handler</text>
+    <rect class="head" x="300" y="58" width="135" height="74" fill="#e4f1eb" stroke="#176b56"/><text class="name" x="367" y="88" text-anchor="middle">Stream</text><text class="name" x="367" y="108" text-anchor="middle">service</text>
+    <rect class="head" x="450" y="58" width="135" height="74" fill="#fff" stroke="#315f78"/><text class="name" x="517" y="88" text-anchor="middle">RTSP</text><text class="name" x="517" y="108" text-anchor="middle">camera</text>
+    <rect class="head" x="600" y="58" width="145" height="74" fill="#e4f1eb" stroke="#176b56"/><text class="name" x="672" y="88" text-anchor="middle">Rolling</text><text class="name" x="672" y="108" text-anchor="middle">buffer</text>
+    <rect class="head" x="760" y="58" width="145" height="74" fill="#e4f1eb" stroke="#176b56"/><text class="name" x="832" y="88" text-anchor="middle">Record</text><text class="name" x="832" y="108" text-anchor="middle">service</text>
+    <rect class="head" x="920" y="58" width="145" height="74" fill="#fff" stroke="#315f78"/><text class="name" x="992" y="88" text-anchor="middle">Media</text><text class="name" x="992" y="108" text-anchor="middle">store</text>
+    <rect class="head" x="1080" y="58" width="105" height="74" fill="#e8f0f4" stroke="#315f78"/><text class="name" x="1132" y="98" text-anchor="middle">SQLite</text>
+    <rect class="head" x="1200" y="58" width="105" height="74" fill="#f6eedf" stroke="#8a5b16"/><text class="name" x="1252" y="88" text-anchor="middle">Replay /</text><text class="name" x="1252" y="108" text-anchor="middle">FFmpeg</text>
+  </g>
+  <g class="life"><path d="M82 132 V1030"/><path d="M222 132 V1030"/><path d="M367 132 V1030"/><path d="M517 132 V1030"/><path d="M672 132 V1030"/><path d="M832 132 V1030"/><path d="M992 132 V1030"/><path d="M1132 132 V1030"/><path d="M1252 132 V1030"/></g>
+  <text x="32" y="166" class="phase">A. ATTACH A STREAM</text>
+  <path class="call" d="M82 190 H222"/><text class="label" x="95" y="182">POST /v1/streams</text>
+  <path class="call" d="M222 222 H367"/><text class="label" x="236" y="214">validate and create buffer</text>
+  <path class="call" d="M367 254 H517"/><text class="label" x="380" y="246">RTSP/TCP; inspect track and clock</text>
+  <path class="return" d="M517 286 H367"/><text class="label" x="382" y="278">video RTP + timing</text>
+  <path class="call" d="M367 318 H672"/><text class="label" x="426" y="310">FFmpeg creates keyframe slices</text>
+  <path class="return" d="M672 350 H222"/><text class="label" x="385" y="342">stream ID; state becomes buffering</text>
+  <path class="rule" d="M25 382 H1300"/><text x="32" y="410" class="phase">B. RECORD A TIME RANGE</text>
+  <path class="call" d="M82 434 H222"/><text class="label" x="95" y="426">POST /v1/records/start</text>
+  <path class="call" d="M222 466 H832"/><text class="label" x="432" y="458">check timing/history and acquire BufferLease</text>
+  <path class="data" d="M832 498 H672"/><text class="label" x="681" y="490">reserve old and future slices</text>
+  <path class="call" d="M832 530 H992"/><text class="label" x="844" y="522">prepare media + sidecar writer</text>
+  <path class="call" d="M832 562 H1132"/><text class="label" x="850" y="554">insert state=recording</text>
+  <path class="data" d="M672 594 H832"/><text class="label" x="682" y="586">leased MPEG-TS slices</text>
+  <path class="data" d="M832 626 H992"/><text class="label" x="844" y="618">remux stream; append JSONL timestamps</text>
+  <path class="call" d="M832 658 H1132"/><text class="label" x="847" y="650">update progress / final state</text>
+  <path class="return" d="M832 690 H222"/><text class="label" x="402" y="682">ready or failed; resource can be polled</text>
+  <path class="rule" d="M25 722 H1300"/><text x="32" y="750" class="phase">C. RETRIEVE A FRAME OR CLIP LATER</text>
+  <path class="call" d="M82 774 H222"/><text class="label" x="95" y="766">GET /v1/replays/{id}/frame</text>
+  <path class="call" d="M222 806 H1252"/><text class="label" x="618" y="798">load recording and check it is servable</text>
+  <path class="call" d="M1252 838 H1132"/><text class="label" x="1129" y="830">read metadata</text>
+  <path class="call" d="M1252 870 H992"/><text class="label" x="1032" y="862">read sidecar index</text>
+  <path class="return" d="M992 902 H1252"/><text class="label" x="1010" y="894">capture timestamp maps to media PTS</text>
+  <path class="data" d="M1252 934 H992"/><text class="label" x="1020" y="926">read source; FFmpeg extracts frame/clip</text>
+  <path class="data" d="M1252 966 H992"/><text class="label" x="1033" y="958">write or reuse derived object</text>
+  <path class="return" d="M992 998 H222"/><text class="label" x="453" y="990">short-lived URL or binary response</text>
+  <path class="return" d="M222 1028 H82"/><text class="label" x="91" y="1020">JSON descriptor or media bytes</text>
+</svg>

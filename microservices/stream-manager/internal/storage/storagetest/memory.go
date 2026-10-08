@@ -1,9 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (C) 2026 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 
-// Package storagetest provides in-memory implementations of the storage
-// seams for unit tests that must not depend on an object store or a
-// database. It is imported only from _test files.
+// Package storagetest provides in-memory storage fakes for unit tests.
 package storagetest
 
 import (

@@ -9,11 +9,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
+	"net/url"
+	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/glebarez/sqlite"
+	"golang.org/x/sys/unix"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 	"gorm.io/gorm/logger"
@@ -87,23 +92,37 @@ var recordingColumns = []string{
 // across storage or media operations; every method here is a single
 // short-lived statement.
 type SQLiteMetadataStore struct {
-	db *gorm.DB
+	db        *gorm.DB
+	lock      *os.File
+	closeOnce sync.Once
+	closeErr  error
 }
 
 var _ RecordingLifecycleStore = (*SQLiteMetadataStore)(nil)
 
-// OpenSQLiteMetadataStore opens (creating if necessary) the SQLite database
-// at dsn, enables WAL mode and a bounded busy timeout, and ensures the
-// recordings table and its index exist.
-//
-// dsn is typically a filesystem path; use "file::memory:?cache=shared" only
-// for tests that need an ephemeral database.
+// OpenSQLiteMetadataStore opens and initializes the database at dsn. File-backed
+// databases use private permissions, a process lock, WAL, and a 5-second timeout.
 func OpenSQLiteMetadataStore(ctx context.Context, dsn string) (*SQLiteMetadataStore, error) {
+	lock, err := acquireSQLiteLock(dsn)
+	if err != nil {
+		return nil, fmt.Errorf("lock sqlite database: %w", err)
+	}
+	keepLock := false
+	defer func() {
+		if !keepLock {
+			_ = releaseSQLiteLock(lock)
+		}
+	}()
+
+	dsn, err = sqliteDSN(dsn)
+	if err != nil {
+		return nil, fmt.Errorf("prepare sqlite DSN: %w", err)
+	}
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
-		// GORM's default logger prints every statement at info level;
-		// query text can carry recording identifiers, so keep it quiet
-		// unless something actually fails.
-		Logger:                 logger.Default.LogMode(logger.Silent),
+		Logger: logger.New(log.New(os.Stderr, "", log.LstdFlags), logger.Config{
+			LogLevel: logger.Warn, ParameterizedQueries: true, IgnoreRecordNotFoundError: true,
+			SlowThreshold: time.Second,
+		}),
 		SkipDefaultTransaction: true,
 	})
 	if err != nil {
@@ -120,18 +139,6 @@ func OpenSQLiteMetadataStore(ctx context.Context, dsn string) (*SQLiteMetadataSt
 	// immediately with SQLITE_BUSY.
 	sqlDB.SetMaxOpenConns(1)
 
-	pragmas := []string{
-		"PRAGMA journal_mode = WAL;",
-		"PRAGMA busy_timeout = 5000;",
-		"PRAGMA foreign_keys = ON;",
-	}
-	for _, pragma := range pragmas {
-		if err := db.WithContext(ctx).Exec(pragma).Error; err != nil {
-			_ = sqlDB.Close()
-			return nil, fmt.Errorf("apply pragma %q: %w", pragma, err)
-		}
-	}
-
 	for _, stmt := range splitStatements(recordingsSchema) {
 		if err := db.WithContext(ctx).Exec(stmt).Error; err != nil {
 			_ = sqlDB.Close()
@@ -139,7 +146,122 @@ func OpenSQLiteMetadataStore(ctx context.Context, dsn string) (*SQLiteMetadataSt
 		}
 	}
 
-	return &SQLiteMetadataStore{db: db}, nil
+	keepLock = true
+	return &SQLiteMetadataStore{db: db, lock: lock}, nil
+}
+
+// acquireSQLiteLock protects a file-backed database from concurrent service processes.
+func acquireSQLiteLock(dsn string) (*os.File, error) {
+	databasePath, isFile, err := sqliteDatabasePath(dsn)
+	if err != nil || !isFile {
+		return nil, err
+	}
+	lock, err := openPrivateSQLiteFile(databasePath + ".lock")
+	if err != nil {
+		return nil, err
+	}
+	if err := unix.Flock(int(lock.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
+		_ = lock.Close()
+		if errors.Is(err, unix.EWOULDBLOCK) || errors.Is(err, unix.EAGAIN) {
+			return nil, errors.New("sqlite database is already in use by another process")
+		}
+		return nil, err
+	}
+
+	database, err := openPrivateSQLiteFile(databasePath)
+	if err != nil {
+		_ = releaseSQLiteLock(lock)
+		return nil, err
+	}
+	if err := database.Close(); err != nil {
+		_ = releaseSQLiteLock(lock)
+		return nil, err
+	}
+	return lock, nil
+}
+
+// sqliteDatabasePath extracts the file path, returning false for in-memory databases.
+func sqliteDatabasePath(dsn string) (string, bool, error) {
+	if dsn == ":memory:" {
+		return "", false, nil
+	}
+	if !strings.HasPrefix(dsn, "file:") {
+		if dsn == "" {
+			return "", false, errors.New("sqlite database path is empty")
+		}
+		return dsn, true, nil
+	}
+
+	databaseURL, err := url.Parse(dsn)
+	if err != nil {
+		return "", false, err
+	}
+	if databaseURL.Opaque == ":memory:" || databaseURL.Query().Get("mode") == "memory" {
+		return "", false, nil
+	}
+	if databaseURL.Host != "" {
+		return "", false, errors.New("sqlite file DSN must not include a host")
+	}
+	databasePath := databaseURL.Path
+	if databaseURL.Opaque != "" {
+		databasePath = databaseURL.Opaque
+	}
+	if databasePath == "" {
+		return "", false, errors.New("sqlite file DSN path is empty")
+	}
+	return databasePath, true, nil
+}
+
+// openPrivateSQLiteFile rejects symlinks and ensures the file is mode 0600.
+func openPrivateSQLiteFile(path string) (*os.File, error) {
+	fd, err := unix.Open(path, unix.O_CREAT|unix.O_RDWR|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	file := os.NewFile(uintptr(fd), path)
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		_ = file.Close()
+		return nil, fmt.Errorf("sqlite path %q is not a regular file", path)
+	}
+	if err := file.Chmod(0o600); err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	return file, nil
+}
+
+// releaseSQLiteLock unlocks and closes a database lock file.
+func releaseSQLiteLock(lock *os.File) error {
+	if lock == nil {
+		return nil
+	}
+	return errors.Join(unix.Flock(int(lock.Fd()), unix.LOCK_UN), lock.Close())
+}
+
+// sqliteDSN adds connection pragmas while preserving file and in-memory DSNs.
+func sqliteDSN(dsn string) (string, error) {
+	var databaseURL *url.URL
+	if strings.HasPrefix(dsn, "file:") {
+		parsed, err := url.Parse(dsn)
+		if err != nil {
+			return "", err
+		}
+		databaseURL = parsed
+	} else {
+		databaseURL = &url.URL{Scheme: "file", Path: dsn}
+	}
+
+	query := databaseURL.Query()
+	query.Add("_pragma", "busy_timeout(5000)")
+	query.Add("_pragma", "journal_mode(WAL)")
+	query.Add("_pragma", "foreign_keys(1)")
+	databaseURL.RawQuery = query.Encode()
+	return databaseURL.String(), nil
 }
 
 func splitStatements(script string) []string {
@@ -154,11 +276,16 @@ func splitStatements(script string) []string {
 }
 
 func (s *SQLiteMetadataStore) Close() error {
-	sqlDB, err := s.db.DB()
-	if err != nil {
-		return err
-	}
-	return sqlDB.Close()
+	s.closeOnce.Do(func() {
+		sqlDB, err := s.db.DB()
+		if err != nil {
+			s.closeErr = err
+		} else {
+			s.closeErr = sqlDB.Close()
+		}
+		s.closeErr = errors.Join(s.closeErr, releaseSQLiteLock(s.lock))
+	})
+	return s.closeErr
 }
 
 func (s *SQLiteMetadataStore) Health(ctx context.Context) error {
@@ -227,24 +354,15 @@ func (s *SQLiteMetadataStore) Save(ctx context.Context, recording model.Recordin
 	return nil
 }
 
-func (s *SQLiteMetadataStore) CreateBatch(ctx context.Context, recordings []model.Recording) ([]model.Recording, error) {
-	if len(recordings) == 0 {
-		return nil, errors.New("no recordings to create")
+func (s *SQLiteMetadataStore) CreateMetadata(ctx context.Context, recording model.Recording) (model.Recording, error) {
+	row, err := recordingToRow(recording)
+	if err != nil {
+		return model.Recording{}, err
 	}
-	rows := make([]recordingRow, len(recordings))
-	for i, recording := range recordings {
-		row, err := recordingToRow(recording)
-		if err != nil {
-			return nil, err
-		}
-		rows[i] = row
+	if err := s.db.WithContext(ctx).Select(recordingColumns).Create(&row).Error; err != nil {
+		return model.Recording{}, fmt.Errorf("create recording %q: %w", recording.RecordingID, err)
 	}
-	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		return tx.Select(recordingColumns).Create(&rows).Error
-	}); err != nil {
-		return nil, fmt.Errorf("create recordings: %w", err)
-	}
-	return recordings, nil
+	return rowToRecording(row)
 }
 
 func (s *SQLiteMetadataStore) GetMetadataByRecordingID(ctx context.Context, recordingID string) (model.Recording, error) {

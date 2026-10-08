@@ -12,14 +12,16 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/open-edge-platform/edge-ai-libraries/microservices/stream-manager/internal/api/common"
 	"github.com/open-edge-platform/edge-ai-libraries/microservices/stream-manager/internal/model"
 	"github.com/open-edge-platform/edge-ai-libraries/microservices/stream-manager/internal/stream"
 )
 
 type streamCreateRequest struct {
-	SensorID   string  `json:"sensor_id"`
-	SourceKind *string `json:"source_kind"`
-	SourceURI  string  `json:"source_uri"`
+	SensorID     string  `json:"sensor_id"`
+	SourceKind   *string `json:"source_kind"`
+	SourceURI    string  `json:"source_uri"`
+	BufferLength *int    `json:"buffer_length"`
 }
 
 type bufferUpdateRequest struct {
@@ -59,6 +61,29 @@ type deletionResponse struct {
 	Deleted  bool   `json:"deleted"`
 }
 
+func (r streamCreateRequest) validate() error {
+	if err := common.CheckID("sensor_id", r.SensorID); err != nil {
+		return err
+	}
+	if r.SourceKind != nil && *r.SourceKind != "uri_source" {
+		return errors.New("source_kind must be uri_source")
+	}
+	if err := common.CheckSourceURI(r.SourceURI); err != nil {
+		return err
+	}
+	if r.BufferLength != nil {
+		return common.CheckBufferLength(*r.BufferLength)
+	}
+	return nil
+}
+
+func (r bufferUpdateRequest) validate() error {
+	if r.BufferLength == nil {
+		return errors.New("buffer_length is required")
+	}
+	return common.CheckBufferLength(*r.BufferLength)
+}
+
 // StreamHandler serves the Stream Attachment APIs.
 type StreamHandler struct {
 	Buffers stream.Bufferer
@@ -68,7 +93,7 @@ func (h StreamHandler) unavailable(c *gin.Context) bool {
 	if h.Buffers != nil {
 		return false
 	}
-	writeError(c, http.StatusServiceUnavailable, "storage_unavailable", "stream buffer service is unavailable")
+	common.WriteError(c, http.StatusServiceUnavailable, "storage_unavailable", "stream buffer service is unavailable")
 	return true
 }
 
@@ -78,15 +103,19 @@ func (h StreamHandler) Create(c *gin.Context) {
 		return
 	}
 	var req streamCreateRequest
-	if err := decodeJSON(c, &req); err != nil {
-		writeError(c, http.StatusBadRequest, "invalid_request", err.Error())
+	if err := common.DecodeJSON(c, &req); err != nil {
+		common.WriteError(c, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
 	if err := req.validate(); err != nil {
-		writeError(c, http.StatusBadRequest, "invalid_request", err.Error())
+		common.WriteError(c, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
-	id, err := h.Buffers.CreateBuffer(c.Request.Context(), req.SourceURI, req.SensorID)
+	bufferLength := time.Duration(0)
+	if req.BufferLength != nil {
+		bufferLength = time.Duration(*req.BufferLength) * time.Second
+	}
+	id, err := h.Buffers.CreateBuffer(c.Request.Context(), req.SourceURI, req.SensorID, bufferLength)
 	if err != nil {
 		writeStreamError(c, err)
 		return
@@ -151,15 +180,16 @@ func (h StreamHandler) UpdateBuffer(c *gin.Context) {
 	}
 	id := c.Param("stream-id")
 	var req bufferUpdateRequest
-	if err := decodeJSON(c, &req); err != nil {
-		writeError(c, http.StatusBadRequest, "invalid_request", err.Error())
+	if err := common.DecodeJSON(c, &req); err != nil {
+		common.WriteError(c, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
 	if err := req.validate(); err != nil {
-		writeError(c, http.StatusBadRequest, "invalid_request", err.Error())
+		common.WriteError(c, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
-	sb, err := h.Buffers.ResizeBuffer(c.Request.Context(), id, *req.BufferLength)
+	bufferLength := time.Duration(*req.BufferLength) * time.Second
+	sb, err := h.Buffers.ResizeBuffer(c.Request.Context(), id, bufferLength)
 	if err != nil {
 		writeStreamError(c, err)
 		return
@@ -170,20 +200,20 @@ func (h StreamHandler) UpdateBuffer(c *gin.Context) {
 func writeStreamError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, stream.ErrStreamNotFound):
-		writeError(c, http.StatusNotFound, "stream_not_found", "stream not found")
+		common.WriteError(c, http.StatusNotFound, "stream_not_found", "stream not found")
 	case errors.Is(err, stream.ErrStreamExists):
-		writeError(c, http.StatusConflict, "stream_exists", err.Error())
+		common.WriteError(c, http.StatusConflict, "stream_exists", err.Error())
 	case errors.Is(err, stream.ErrActiveReaders):
-		writeError(c, http.StatusConflict, "active_dependency", "active readers still need this buffer")
+		common.WriteError(c, http.StatusConflict, "active_dependency", "active readers still need this buffer")
 	case errors.Is(err, stream.ErrUnsupportedSource):
-		writeError(c, http.StatusUnsupportedMediaType, "unsupported_media", stream.ErrUnsupportedSource.Error())
+		common.WriteError(c, http.StatusUnsupportedMediaType, "unsupported_media", stream.ErrUnsupportedSource.Error())
 	case errors.Is(err, stream.ErrInvalidRequest):
-		writeError(c, http.StatusBadRequest, "invalid_request", "invalid buffer request")
+		common.WriteError(c, http.StatusBadRequest, "invalid_request", "invalid buffer request")
 	case errors.Is(err, syscall.ENOSPC), errors.Is(err, syscall.EDQUOT):
-		writeError(c, http.StatusTooManyRequests, "capacity_exhausted", "not enough buffer storage")
+		common.WriteError(c, http.StatusTooManyRequests, "capacity_exhausted", "not enough buffer storage")
 	default:
 		log.Printf("stream operation failed: %v", err)
-		writeInternalError(c)
+		common.WriteInternalError(c)
 	}
 }
 

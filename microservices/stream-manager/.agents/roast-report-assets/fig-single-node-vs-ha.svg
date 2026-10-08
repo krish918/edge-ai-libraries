@@ -1,0 +1,29 @@
+<!-- SPDX-FileCopyrightText: (C) 2026 Intel Corporation -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 430" role="img" aria-labelledby="t d">
+  <title id="t">Local single-process state versus a routed multi-replica platform</title><desc id="d">Stream Manager currently keeps buffers and stream ownership in one process with locked local SQLite and media paths. NVIDIA VIOS documents multiple processing replicas behind SDR and Envoy using shared storage and centralized PostgreSQL.</desc>
+  <defs><marker id="a" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0 0L10 4L0 8Z" fill="#569cd6"/></marker></defs>
+  <rect width="900" height="430" rx="14" fill="#1a1d24"/>
+  <text x="28" y="38" fill="#e6e6e6" font-family="Segoe UI,sans-serif" font-size="21" font-weight="700">Replica count is an ownership problem</text>
+  <rect x="28" y="72" width="388" height="300" rx="10" fill="#20242c" stroke="#dcdcaa" stroke-width="2"/>
+  <text x="48" y="104" fill="#dcdcaa" font-family="Segoe UI,sans-serif" font-size="16" font-weight="700">TODAY: LOCAL OWNERSHIP</text>
+  <g font-family="Segoe UI,sans-serif" text-anchor="middle">
+    <rect x="67" y="132" width="310" height="60" rx="7" fill="#26313a" stroke="#569cd6"/><text x="222" y="168" fill="#e6e6e6" font-size="15">One Stream Manager process</text>
+    <rect x="53" y="230" width="160" height="54" rx="7" fill="#3a2927" stroke="#f48771"/><text x="133" y="262" fill="#e6e6e6" font-size="14">in-memory streams</text>
+    <rect x="229" y="230" width="160" height="54" rx="7" fill="#3a2927" stroke="#f48771"/><text x="309" y="262" fill="#e6e6e6" font-size="14">tmpfs buffers</text>
+    <rect x="120" y="310" width="220" height="42" rx="7" fill="#26313a" stroke="#dcdcaa"/><text x="230" y="336" fill="#e6e6e6" font-size="14">locked local SQLite</text>
+  </g>
+  <path d="M222 192V215M133 284L180 310M309 284L278 310" fill="none" stroke="#569cd6" stroke-width="2" marker-end="url(#a)"/>
+  <rect x="484" y="72" width="388" height="300" rx="10" fill="#20242c" stroke="#4ec9b0" stroke-width="2"/>
+  <text x="504" y="104" fill="#4ec9b0" font-family="Segoe UI,sans-serif" font-size="16" font-weight="700">VIOS DOCUMENTED SCALE MODEL</text>
+  <g font-family="Segoe UI,sans-serif" text-anchor="middle">
+    <rect x="523" y="132" width="310" height="52" rx="7" fill="#26313a" stroke="#569cd6"/><text x="678" y="164" fill="#e6e6e6" font-size="14">SDR + Envoy routing</text>
+    <rect x="514" y="216" width="95" height="56" rx="7" fill="#26313a" stroke="#4ec9b0"/><text x="561" y="250" fill="#e6e6e6" font-size="13">replica 1</text>
+    <rect x="630" y="216" width="95" height="56" rx="7" fill="#26313a" stroke="#4ec9b0"/><text x="677" y="250" fill="#e6e6e6" font-size="13">replica 2</text>
+    <rect x="746" y="216" width="95" height="56" rx="7" fill="#26313a" stroke="#4ec9b0"/><text x="793" y="250" fill="#e6e6e6" font-size="13">replica N</text>
+    <rect x="514" y="310" width="150" height="42" rx="7" fill="#26313a" stroke="#4ec9b0"/><text x="589" y="336" fill="#e6e6e6" font-size="13">shared media</text>
+    <rect x="690" y="310" width="150" height="42" rx="7" fill="#26313a" stroke="#4ec9b0"/><text x="765" y="336" fill="#e6e6e6" font-size="13">central PostgreSQL</text>
+  </g>
+  <path d="M678 184V202M561 272L570 310M677 272V310M793 272L780 310" fill="none" stroke="#569cd6" stroke-width="2" marker-end="url(#a)"/>
+  <text x="28" y="405" fill="#dcdcaa" font-family="Segoe UI,sans-serif" font-size="13">S3-backed objects do not distribute in-memory stream ownership or local database locks.</text>
+</svg>

@@ -25,7 +25,8 @@ const (
 // is not set. Deployments override it with the released tag.
 const DefaultVersion = "0.1.0"
 
-// Storage backend selectors for STREAM_MANAGER_STORAGE_BACKEND.
+// Storage backend selectors for STREAM_MANAGER_STORAGE_BACKEND. Load defaults
+// to filesystem; select S3 explicitly for archived-media retrieval.
 const (
 	StorageBackendS3         = "s3"
 	StorageBackendFilesystem = "filesystem"
@@ -39,7 +40,7 @@ const DefaultFSMaxStageBytes int64 = 2 << 30 // 2 GiB
 
 const (
 	DefaultBufferLength     = 30 * time.Second
-	MinBufferLength         = 1 * time.Second
+	MinBufferLength         = 5 * time.Second
 	MaxBufferLength         = 300 * time.Second
 	DefaultMaxActiveRecords = 32
 )
@@ -88,8 +89,8 @@ type Config struct {
 	// PresignExpiry is how long an issued media URL stays valid.
 	PresignExpiry time.Duration
 
-	// StorageBackend selects the MediaStore implementation: "s3" (default)
-	// or "filesystem".
+	// StorageBackend selects the MediaStore implementation: "filesystem" (default)
+	// or "s3" for archived-media retrieval.
 	StorageBackend string
 	// FSRoot is the local directory backing the filesystem MediaStore.
 	// Required when StorageBackend is "filesystem".

@@ -6,6 +6,7 @@ package storage
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -78,6 +79,77 @@ func TestSchemaUsesCanonicalColumnsAndWAL(t *testing.T) {
 	}
 }
 
+func TestConnectionPragmasAreAppliedAfterReconnect(t *testing.T) {
+	store := openTestMetadataStore(t)
+	sqlDB, err := store.db.DB()
+	if err != nil {
+		t.Fatalf("get sql.DB: %v", err)
+	}
+	sqlDB.SetMaxIdleConns(0)
+
+	var busyTimeout int
+	if err := store.db.Raw("PRAGMA busy_timeout").Scan(&busyTimeout).Error; err != nil {
+		t.Fatalf("read busy_timeout: %v", err)
+	}
+	if busyTimeout != 5000 {
+		t.Fatalf("busy_timeout = %d, want 5000", busyTimeout)
+	}
+
+	var foreignKeys int
+	if err := store.db.Raw("PRAGMA foreign_keys").Scan(&foreignKeys).Error; err != nil {
+		t.Fatalf("read foreign_keys: %v", err)
+	}
+	if foreignKeys != 1 {
+		t.Fatalf("foreign_keys = %d, want 1", foreignKeys)
+	}
+}
+
+func TestOpenSQLiteMetadataStoreSupportsMemoryDSN(t *testing.T) {
+	store, err := OpenSQLiteMetadataStore(context.Background(), "file::memory:?cache=shared")
+	if err != nil {
+		t.Fatalf("open in-memory store: %v", err)
+	}
+	if err := store.Health(context.Background()); err != nil {
+		t.Fatalf("in-memory store health: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("close in-memory store: %v", err)
+	}
+}
+
+func TestSQLiteMetadataStoreUsesPrivateFilesAndExclusiveLock(t *testing.T) {
+	databasePath := filepath.Join(t.TempDir(), "recordings.db")
+	if err := os.WriteFile(databasePath, nil, 0o644); err != nil {
+		t.Fatalf("create database: %v", err)
+	}
+	store, err := OpenSQLiteMetadataStore(context.Background(), databasePath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	for _, path := range []string{databasePath, databasePath + ".lock"} {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("stat %q: %v", path, err)
+		}
+		if got := info.Mode().Perm(); got != 0o600 {
+			t.Errorf("permissions for %q = %04o, want 0600", path, got)
+		}
+	}
+	if _, err := OpenSQLiteMetadataStore(context.Background(), databasePath); err == nil {
+		t.Fatal("second store opened the locked database")
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+	second, err := OpenSQLiteMetadataStore(context.Background(), databasePath)
+	if err != nil {
+		t.Fatalf("reopen database after releasing lock: %v", err)
+	}
+	if err := second.Close(); err != nil {
+		t.Fatalf("close reopened store: %v", err)
+	}
+}
+
 func TestSaveGetRoundTripPreservesEveryField(t *testing.T) {
 	ctx := context.Background()
 	store := openTestMetadataStore(t)
@@ -115,8 +187,11 @@ func TestLifecycleMetadataCRUDAndCursorPagination(t *testing.T) {
 	second.SensorID = "sensor-02"
 	second.RecordingPath = "recordings/rec-live-002/media.ts"
 	second.CreationTS = first.CreationTS.Add(time.Second)
-	if _, err := store.CreateBatch(ctx, []model.Recording{first, second}); err != nil {
-		t.Fatalf("CreateBatch: %v", err)
+	if _, err := store.CreateMetadata(ctx, first); err != nil {
+		t.Fatalf("CreateMetadata first: %v", err)
+	}
+	if _, err := store.CreateMetadata(ctx, second); err != nil {
+		t.Fatalf("CreateMetadata second: %v", err)
 	}
 
 	page, cursor, err := store.ListMetadata(ctx, model.RecordingFilter{Limit: 1, State: model.RecordingStateRecording})

@@ -86,13 +86,8 @@ type rawSidecar struct {
 	Samples     []rawSidecarSample `json:"samples"`
 }
 
-// ParseSidecar decodes and validates sidecar JSON read from a MediaStore.
-//
-// Decoding is strict: unknown fields are rejected, so a sidecar written
-// against a different schema fails loudly here instead of losing data
-// silently. Capture timestamps (wall-clock, RFC3339Nano) and media
-// timestamps (pts/timescale, position inside the recording) are distinct
-// clocks and are never substituted for one another.
+// ParseSidecar strictly validates JSON sidecars and keeps capture timestamps
+// (wall clock) distinct from PTS/timescale (media clock).
 func ParseSidecar(r io.Reader) (*Sidecar, error) {
 	decoder := json.NewDecoder(r)
 	decoder.DisallowUnknownFields()
@@ -214,15 +209,8 @@ type rawSidecarJSONLHeader struct {
 	Timescale   int64  `json:"timescale"`
 }
 
-// ParseSidecarJSONL decodes and validates a version 2 (append-only JSONL)
-// sidecar: a header line followed by one JSON object per sample line. It is
-// used for a live recording's sidecar, which is appended to while the
-// recording is still being written.
-//
-// The parser tolerates exactly one failure mode a version 1 sidecar does
-// not need to: the final line may be a partially written sample (the writer
-// was interrupted mid-append). Any other malformed line — including a
-// malformed header — fails the whole parse, the same as version 1.
+// ParseSidecarJSONL validates a version 2 header and sample lines. It permits
+// a partial final sample from an interrupted write; other malformed lines fail.
 func ParseSidecarJSONL(r io.Reader) (*Sidecar, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {
@@ -382,15 +370,9 @@ func (s *Sidecar) Coverage() (startTS, endTS time.Time) {
 	return s.Samples[0].CaptureTS, s.Samples[len(s.Samples)-1].CaptureTS
 }
 
-// FindByCaptureTimestamp resolves a requested wall-clock time to a sample.
-// For MatchExact, it returns ErrNoExactMatch unless a sample's capture
-// timestamp is exactly equal to requested. For MatchNearest (the default),
-// it selects the sample with the smallest absolute time difference,
-// preferring the earlier capture timestamp on a tie.
-//
-// Both modes require the requested instant to fall inside the recording's
-// stored coverage, so a gap is never papered over with footage from a
-// different time.
+// FindByCaptureTimestamp requires the request within stored coverage. Exact
+// mode requires equality; nearest mode chooses the closest sample and prefers
+// the earlier sample on ties.
 func (s *Sidecar) FindByCaptureTimestamp(requested time.Time, match MatchMode) (SidecarSample, error) {
 	if len(s.Samples) == 0 {
 		return SidecarSample{}, ErrSidecarEmpty

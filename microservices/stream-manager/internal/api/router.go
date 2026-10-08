@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/open-edge-platform/edge-ai-libraries/microservices/stream-manager/internal/api/common"
 	"github.com/open-edge-platform/edge-ai-libraries/microservices/stream-manager/internal/api/handler"
 	"github.com/open-edge-platform/edge-ai-libraries/microservices/stream-manager/internal/logging"
 	"github.com/open-edge-platform/edge-ai-libraries/microservices/stream-manager/internal/mediaaccess"
@@ -18,18 +19,15 @@ import (
 	"github.com/open-edge-platform/edge-ai-libraries/microservices/stream-manager/internal/stream"
 )
 
-// NewRouter creates the HTTP router used by the Stream Manager service,
-// built on Gin. It returns http.Handler (gin.Engine satisfies it) so
-// callers (production bootstrap and tests) don't need to depend on Gin
-// directly. version is reported by GET /v1/version; logger receives one
-// access-log line per request. mediaSigner may be nil, in which case
-// GET /v1/media/{token} rejects every request; it is non-nil whenever
-// STREAM_MANAGER_MEDIA_TOKEN_SECRET is configured, which is required for
-// the filesystem storage backend and optional for S3.
+var _ handler.RecordingService = (*record.Service)(nil)
+
+// NewRouter builds the HTTP API as an http.Handler. version is returned by
+// GET /v1/version, and logger receives one access entry per request. Filesystem
+// media requires mediaSigner; nil disables /v1/media, while S3 may presign directly.
 func NewRouter(service *replay.RetrievalService, media storage.MediaStore, version string, logger *slog.Logger, mediaSigner *mediaaccess.Signer, buffers stream.Bufferer, recordings *record.Service) http.Handler {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
-	router.Use(logging.Middleware(logger), logging.Recovery(), handler.BodyLimit())
+	router.Use(logging.Middleware(logger), logging.Recovery(), common.BodyLimit())
 
 	retrievalHandler := handler.NewRetrievalHandler(service, media)
 	mediaHandler := handler.NewMediaHandler(media, mediaSigner)
@@ -45,16 +43,20 @@ func NewRouter(service *replay.RetrievalService, media storage.MediaStore, versi
 	streams := handler.StreamHandler{Buffers: buffers}
 	router.POST("/v1/streams", streams.Create)
 	router.GET("/v1/streams", streams.List)
-	streamRoutes := router.Group("/v1/streams/:stream-id", handler.RequireID("stream-id", "stream_not_found", "stream not found"))
+	streamRoutes := router.Group("/v1/streams/:stream-id", common.RequireID("stream-id", "stream_not_found", "stream not found"))
 	streamRoutes.GET("", streams.Get)
 	streamRoutes.DELETE("", streams.Delete)
 	streamRoutes.PUT("/buffer", streams.UpdateBuffer)
 
-	records := handler.RecordHandler{Records: recordings}
+	var recordingService handler.RecordingService
+	if recordings != nil {
+		recordingService = recordings
+	}
+	records := handler.RecordHandler{Records: recordingService}
 	router.POST("/v1/records/start", records.Start)
 	router.POST("/v1/records/stop", records.Stop)
 	router.GET("/v1/records", records.List)
-	recordRoutes := router.Group("/v1/records/:recording-id", handler.RequireID("recording-id", "record_not_found", "record not found"))
+	recordRoutes := router.Group("/v1/records/:recording-id", common.RequireID("recording-id", "record_not_found", "record not found"))
 	recordRoutes.GET("", records.Get)
 	recordRoutes.DELETE("", records.Delete)
 

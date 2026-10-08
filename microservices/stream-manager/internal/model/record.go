@@ -66,13 +66,8 @@ func (r Recording) IsLive() bool {
 	return r.State == RecordingStateRecording && r.EndTS == nil
 }
 
-// IsServable reports whether retrieval can resolve and extract media for
-// this recording, covering both a finalized recording and one still being
-// written. It rejects the states that indicate an in-progress producer
-// operation (finalizing) or a permanently unusable one (failed), and it
-// rejects any state/end_ts combination that the producer contract forbids
-// (a finalized recording with no end_ts, or a live recording that already
-// has one).
+// IsServable accepts ready recordings with an end time and recording-state
+// entries without one; finalizing, failed, and inconsistent entries are rejected.
 func (r Recording) IsServable() bool {
 	switch r.State {
 	case RecordingStateReady:
@@ -123,7 +118,7 @@ type MediaResult struct {
 
 // ErrorResponse is returned on validation and retrieval errors.
 type ErrorResponse struct {
-	Status       int    `json:"status"`
-	ErrorCode    string `json:"error_code"`
-	ErrorDetails string `json:"error_details"`
+	Status      int    `json:"status"`
+	ErrorCode   string `json:"error_code"`
+	ErrorDetail string `json:"error_detail"`
 }

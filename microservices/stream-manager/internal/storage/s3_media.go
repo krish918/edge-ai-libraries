@@ -24,9 +24,7 @@ import (
 // bucket.
 var ErrObjectNotFound = errors.New("object not found")
 
-// s3API is the subset of the S3 client surface this store uses. Depending on
-// the interface rather than *s3.Client keeps the store unit-testable against
-// a fake without a live endpoint.
+// s3API is the S3 client subset used by the store and its tests.
 type s3API interface {
 	GetObject(ctx context.Context, params *s3.GetObjectInput, optFns ...func(*s3.Options)) (*s3.GetObjectOutput, error)
 	PutObject(ctx context.Context, params *s3.PutObjectInput, optFns ...func(*s3.Options)) (*s3.PutObjectOutput, error)
@@ -41,13 +39,8 @@ type s3Presigner interface {
 	PresignGetObject(ctx context.Context, params *s3.GetObjectInput, optFns ...func(*s3.PresignOptions)) (*v4.PresignedHTTPRequest, error)
 }
 
-// S3Config holds the connection details for an S3-compatible object store.
-//
-// SeaweedFS's S3 gateway is the only backend certified so far. Its profile
-// is: an explicit endpoint URL, path-style addressing, a configured (but
-// semantically unused) region, and gateway credentials. The configuration
-// and code are deliberately vendor-neutral so qualifying another backend
-// later does not require an interface change.
+// S3Config configures an S3-compatible object store. SeaweedFS is currently
+// certified; the configuration remains protocol-based for other backends.
 type S3Config struct {
 	// Endpoint is the S3 service base URL, e.g. "http://localhost:8333".
 	Endpoint string
@@ -72,20 +65,16 @@ type S3Config struct {
 	SessionToken string
 }
 
-// S3MediaStore is the production MediaStore implementation, backed by any
-// S3-compatible object store. It depends only on the S3 protocol, never on a
-// vendor SDK.
-//
-// The store requires the bucket to already exist and never attempts bucket
-// administration. The identity it runs as needs only object-level rights
-// within the configured prefix: GetObject, PutObject, DeleteObject, and
-// ListBucket constrained to that prefix.
+// S3MediaStore implements MediaStore with S3-compatible APIs. The bucket must
+// pre-exist; credentials need object read/write/delete and prefix-scoped listing.
 type S3MediaStore struct {
 	client  s3API
 	presign s3Presigner
 	bucket  string
 	prefix  string
 }
+
+var _ RecordingSidecarMediaStore = (*S3MediaStore)(nil)
 
 // NewS3MediaStore builds an S3MediaStore from cfg. It does not verify
 // connectivity; call Health to confirm the bucket is reachable.
@@ -190,6 +179,14 @@ func (s *S3MediaStore) OpenRecording(ctx context.Context, recordingPath string) 
 
 func (s *S3MediaStore) OpenSidecar(ctx context.Context, recordingID string) (io.ReadCloser, error) {
 	key, err := RecordingSidecarKey(recordingID)
+	if err != nil {
+		return nil, err
+	}
+	return s.openObject(ctx, key)
+}
+
+func (s *S3MediaStore) OpenSidecarForRecording(ctx context.Context, recordingID, recordingPath string) (io.ReadCloser, error) {
+	key, err := RecordingSidecarKeyForPath(recordingID, recordingPath)
 	if err != nil {
 		return nil, err
 	}

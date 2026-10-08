@@ -1,8 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (C) 2026 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 
-// Package logging configures the process-wide structured logger and provides
-// the HTTP middleware that gives every request an ID and an access-log line.
+// Package logging configures structured logging and request middleware.
 package logging
 
 import (
@@ -117,9 +116,9 @@ func Recovery() gin.HandlerFunc {
 	return gin.CustomRecoveryWithWriter(nil, func(c *gin.Context, recovered any) {
 		FromContext(c.Request.Context()).Error("panic recovered", "panic", fmt.Sprint(recovered))
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
-			"status":        http.StatusInternalServerError,
-			"error_code":    "internal_error",
-			"error_details": "internal error",
+			"status":       http.StatusInternalServerError,
+			"error_code":   "internal_error",
+			"error_detail": "internal error",
 		})
 	})
 }

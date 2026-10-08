@@ -23,7 +23,8 @@ not on persistent storage. See [Get Started](docs/user-guide/get-started.md) for
 
 See [Get Started](docs/user-guide/get-started.md) for prerequisites and a complete recording and
 replay example. See the [API reference](docs/user-guide/api-reference.md) for routes, request fields,
-responses, and errors.
+responses, and errors. Deployment checks and QA acceptance criteria are in the
+[deployment end-to-end QA guide](docs/user-guide/deployment-e2e-qa.md).
 
 ## Build and test
 

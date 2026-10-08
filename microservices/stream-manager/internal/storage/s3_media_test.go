@@ -221,6 +221,34 @@ func TestSourceWritesLandUnderPrefixAndLayout(t *testing.T) {
 	}
 }
 
+func TestOpenSidecarForLiveRecordingUsesJSONLKey(t *testing.T) {
+	ctx := context.Background()
+	store, fake := newFakeStore(t, "dev")
+	const recordingID = "rec-live-1"
+	const recordingPath = "recordings/rec-live-1/media.ts"
+	want := "{\"version\":2}\n{\"ordinal\":0}\n"
+	fake.objects["dev/recordings/rec-live-1/sidecar.jsonl"] = fakeObject{
+		body:        []byte(want),
+		contentType: "application/x-ndjson",
+	}
+
+	reader, err := store.OpenSidecarForRecording(ctx, recordingID, recordingPath)
+	if err != nil {
+		t.Fatalf("OpenSidecarForRecording: %v", err)
+	}
+	defer reader.Close()
+	body, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("read sidecar: %v", err)
+	}
+	if string(body) != want {
+		t.Fatalf("sidecar body = %q, want %q", body, want)
+	}
+	if len(fake.objects["dev/recordings/rec-live-1/sidecar.json"].body) != 0 {
+		t.Fatal("read used the JSON sidecar key for an MPEG-TS recording")
+	}
+}
+
 func TestOpenRejectsKeysOutsideLayout(t *testing.T) {
 	ctx := context.Background()
 	store, fake := newFakeStore(t, "dev")

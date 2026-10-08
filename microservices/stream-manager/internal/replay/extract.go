@@ -21,24 +21,17 @@ import (
 // recording).
 var ErrExtractionFailed = errors.New("media extraction failed")
 
-// FrameExtractor produces a single still image at a given media-clock
-// position (seconds from the start of the recording, as resolved by the
-// sidecar) in the requested format ("jpeg" or "png").
+// FrameExtractor extracts a JPEG or PNG frame at a sidecar-resolved media time.
 type FrameExtractor interface {
 	ExtractFrame(ctx context.Context, recording io.Reader, mediaTimeSeconds float64, format string) ([]byte, error)
 }
 
-// ClipExtractor produces a trimmed sub-clip covering [startSeconds,
-// endSeconds) of the recording's media clock, in the requested format
-// ("mp4").
+// ClipExtractor extracts an MP4 clip for the media-time interval [start, end).
 type ClipExtractor interface {
 	ExtractClip(ctx context.Context, recording io.Reader, startSeconds, endSeconds float64, format string) ([]byte, error)
 }
 
-// Extractor is the full extraction capability required by the retrieval
-// layer. It is defined narrowly so alternative implementations (e.g. a
-// GStreamer/DLStreamer-backed extractor) can be swapped in without touching
-// callers.
+// Extractor combines frame and clip extraction capabilities.
 type Extractor interface {
 	FrameExtractor
 	ClipExtractor

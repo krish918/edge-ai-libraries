@@ -1,10 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (C) 2026 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 
-// Package replay resolves and serves frame/clip media for previously
-// recorded streams: it maps a requested wall-clock timestamp (or range) to
-// media-clock positions via a recording's sidecar index, extracts the
-// derived media, and stores/presigns the result.
+// Package replay resolves recording timestamps and extracts frame/clip media.
 package replay
 
 import (
@@ -265,13 +262,8 @@ func (s *RetrievalService) publishDerived(ctx context.Context, key, contentType 
 	return url, expiryTS, nil
 }
 
-// withRecording opens the source recording, hands the stream to an
-// extraction callback, and closes it afterwards, keeping the open/close
-// pairing in one place. Before opening a live recording's source, it checks
-// the recording's reported size against maxStageBytes: extraction stages
-// the entire source into a temporary file, and an unbounded live recording
-// could otherwise exhaust local disk. Finalized recordings are not subject
-// to this check.
+// withRecording stages media for extraction and closes it afterwards. The
+// size limit applies to live recordings, which may still be growing.
 func (s *RetrievalService) withRecording(ctx context.Context, recording model.Recording, fn func(io.Reader) ([]byte, error)) ([]byte, error) {
 	if recording.IsLive() && s.maxStageBytes > 0 {
 		if recording.SizeBytes <= 0 {

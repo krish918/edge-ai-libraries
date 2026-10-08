@@ -97,10 +97,10 @@ func TestMediaResultJSONUsesCanonicalNames(t *testing.T) {
 
 func TestErrorResponseJSONUsesCanonicalNames(t *testing.T) {
 	encoded := map[string]any{}
-	marshalInto(t, ErrorResponse{Status: 404, ErrorCode: "recording_not_found", ErrorDetails: "recording not found"}, &encoded)
+	marshalInto(t, ErrorResponse{Status: 404, ErrorCode: "recording_not_found", ErrorDetail: "recording not found"}, &encoded)
 
-	assertKeysPresent(t, encoded, "status", "error_code", "error_details")
-	assertKeysAbsent(t, encoded, "error_detail")
+	assertKeysPresent(t, encoded, "status", "error_code", "error_detail")
+	assertKeysAbsent(t, encoded, "error_details")
 }
 
 func TestFrameAndClipRequestsRoundTripWallClock(t *testing.T) {

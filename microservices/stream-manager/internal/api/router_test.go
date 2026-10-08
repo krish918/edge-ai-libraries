@@ -125,7 +125,7 @@ func framePath(ts time.Time, extra string) string {
 }
 
 func clipPath(start time.Time, extra string) string {
-	return "/v1/replays/rec-001/clip?timestamp_start=" + url.QueryEscape(start.Format(time.RFC3339Nano)) + extra
+	return "/v1/replays/rec-001/clip?start_ts=" + url.QueryEscape(start.Format(time.RFC3339Nano)) + extra
 }
 
 func decodeError(t *testing.T, rr *httptest.ResponseRecorder, wantStatus int, wantCode string) {
@@ -187,6 +187,11 @@ func TestHealthzRemoved(t *testing.T) {
 	if rr := env.do(t, "/healthz", ""); rr.Code != http.StatusNotFound {
 		t.Fatalf("/healthz status = %d, want 404", rr.Code)
 	}
+}
+
+func TestInvalidStreamPathUsesStandardErrorEnvelope(t *testing.T) {
+	env := newUnitEnv(t)
+	decodeError(t, env.do(t, "/v1/streams/bad%21", ""), http.StatusNotFound, "stream_not_found")
 }
 
 // lastLog returns the most recent access-log entry written by the router.
@@ -256,6 +261,32 @@ func TestVersion(t *testing.T) {
 	body := decodeJSON(t, rr)
 	if body["version"] != testVersion || len(body) != 1 {
 		t.Fatalf("body = %v, want {version: %q}", body, testVersion)
+	}
+}
+
+func TestSwaggerUIAndEmbeddedOpenAPISpec(t *testing.T) {
+	env := newUnitEnv(t)
+
+	ui := env.do(t, "/docs/v1/index.html", "")
+	if ui.Code != http.StatusOK || !strings.Contains(ui.Body.String(), "swagger-ui") {
+		t.Fatalf("Swagger UI status/body = %d/%q", ui.Code, ui.Body.String())
+	}
+	asset := env.do(t, "/docs/v1/swagger-ui.css", "")
+	if asset.Code != http.StatusOK || !strings.Contains(asset.Header().Get("Content-Type"), "text/css") {
+		t.Fatalf("Swagger CSS status/content type = %d/%q", asset.Code, asset.Header().Get("Content-Type"))
+	}
+
+	initializer := env.do(t, "/docs/v1/swagger-initializer.js", "")
+	if initializer.Code != http.StatusOK || !strings.Contains(initializer.Body.String(), "openapi.yaml") {
+		t.Fatalf("Swagger initializer status/body = %d/%q", initializer.Code, initializer.Body.String())
+	}
+
+	spec := env.do(t, "/docs/v1/openapi.yaml", "")
+	if spec.Code != http.StatusOK || !strings.Contains(spec.Body.String(), "openapi: 3.0.3") {
+		t.Fatalf("OpenAPI spec status/body = %d/%q", spec.Code, spec.Body.String())
+	}
+	if got := spec.Header().Get("Content-Type"); got != "application/yaml; charset=utf-8" {
+		t.Fatalf("OpenAPI content type = %q", got)
 	}
 }
 
@@ -386,6 +417,7 @@ func TestFrameRejections(t *testing.T) {
 	}{
 		{"missing timestamp", "/v1/replays/rec-001/frame", "", http.StatusBadRequest, "invalid_timestamp"},
 		{"bad timestamp", "/v1/replays/rec-001/frame?timestamp=yesterday", "", http.StatusBadRequest, "invalid_timestamp"},
+		{"timestamp with offset", "/v1/replays/rec-001/frame?timestamp=2026-09-21T00%3A00%3A03-05%3A00", "", http.StatusBadRequest, "invalid_timestamp"},
 		{"unsupported format", framePath(inCoverage, "&format=gif"), "", http.StatusUnsupportedMediaType, "unsupported_media"},
 		{"unsupported match", framePath(inCoverage, "&match=fuzzy"), "", http.StatusBadRequest, "invalid_request"},
 		{"incompatible accept", framePath(inCoverage, ""), "video/mp4", http.StatusNotAcceptable, "not_acceptable"},
@@ -411,7 +443,7 @@ func TestClipBinaryByDuration(t *testing.T) {
 	env := newUnitEnv(t)
 	start := fixtureBase.Add(2 * time.Second)
 
-	rr := env.do(t, clipPath(start, "&duration_seconds=1.5&format=mp4"), "video/mp4")
+	rr := env.do(t, clipPath(start, "&duration=1.5&format=mp4"), "video/mp4")
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d body %s", rr.Code, rr.Body.String())
 	}
@@ -435,7 +467,7 @@ func TestClipJSONByEndTimestampResolvesNearest(t *testing.T) {
 	start := fixtureBase.Add(1900 * time.Millisecond)
 	end := fixtureBase.Add(3600 * time.Millisecond)
 
-	result := decodeResult(t, env.do(t, clipPath(start, "&timestamp_end="+url.QueryEscape(end.Format(time.RFC3339Nano))), "application/json"))
+	result := decodeResult(t, env.do(t, clipPath(start, "&end_ts="+url.QueryEscape(end.Format(time.RFC3339Nano))), "application/json"))
 	if result.MediaType != "clip" || result.ContentType != "video/mp4" || result.ExactMatch {
 		t.Fatalf("result %+v", result)
 	}
@@ -453,7 +485,7 @@ func TestClipJSONByEndTimestampResolvesNearest(t *testing.T) {
 func TestClipURLRouteAlwaysReturnsJSON(t *testing.T) {
 	env := newUnitEnv(t)
 	start := fixtureBase.Add(2 * time.Second)
-	rr := env.do(t, "/v1/replays/rec-001/clip/url?timestamp_start="+url.QueryEscape(start.Format(time.RFC3339Nano))+"&duration_seconds=2", "video/mp4")
+	rr := env.do(t, "/v1/replays/rec-001/clip/url?start_ts="+url.QueryEscape(start.Format(time.RFC3339Nano))+"&duration=2", "video/mp4")
 	result := decodeResult(t, rr)
 	if result.MediaType != "clip" || result.URL == "" {
 		t.Fatalf("result %+v", result)
@@ -463,7 +495,7 @@ func TestClipURLRouteAlwaysReturnsJSON(t *testing.T) {
 func TestClipRejections(t *testing.T) {
 	env := newUnitEnv(t)
 	start := fixtureBase.Add(2 * time.Second)
-	endParam := func(ts time.Time) string { return "&timestamp_end=" + url.QueryEscape(ts.Format(time.RFC3339Nano)) }
+	endParam := func(ts time.Time) string { return "&end_ts=" + url.QueryEscape(ts.Format(time.RFC3339Nano)) }
 
 	cases := []struct {
 		name   string
@@ -472,19 +504,21 @@ func TestClipRejections(t *testing.T) {
 		status int
 		code   string
 	}{
-		{"missing start", "/v1/replays/rec-001/clip?duration_seconds=1", "", http.StatusBadRequest, "invalid_timestamp"},
+		{"missing start", "/v1/replays/rec-001/clip?duration=1", "", http.StatusBadRequest, "invalid_timestamp"},
 		{"missing boundary", clipPath(start, ""), "", http.StatusBadRequest, "invalid_request"},
-		{"both boundaries", clipPath(start, endParam(start.Add(time.Second))+"&duration_seconds=1"), "", http.StatusBadRequest, "invalid_request"},
-		{"bad end", clipPath(start, "&timestamp_end=soon"), "", http.StatusBadRequest, "invalid_timestamp"},
-		{"non-numeric duration", clipPath(start, "&duration_seconds=abc"), "", http.StatusBadRequest, "invalid_duration"},
-		{"zero duration", clipPath(start, "&duration_seconds=0"), "", http.StatusBadRequest, "invalid_duration"},
-		{"negative duration", clipPath(start, "&duration_seconds=-2"), "", http.StatusBadRequest, "invalid_duration"},
+		{"both boundaries", clipPath(start, endParam(start.Add(time.Second))+"&duration=1"), "", http.StatusBadRequest, "invalid_request"},
+		{"bad end", clipPath(start, "&end_ts=soon"), "", http.StatusBadRequest, "invalid_timestamp"},
+		{"start with offset", "/v1/replays/rec-001/clip?start_ts=2026-09-21T00%3A00%3A02-05%3A00&duration=1", "", http.StatusBadRequest, "invalid_timestamp"},
+		{"end with offset", clipPath(start, "&end_ts=2026-09-21T00%3A00%3A03-05%3A00"), "", http.StatusBadRequest, "invalid_timestamp"},
+		{"non-numeric duration", clipPath(start, "&duration=abc"), "", http.StatusBadRequest, "invalid_duration"},
+		{"zero duration", clipPath(start, "&duration=0"), "", http.StatusBadRequest, "invalid_duration"},
+		{"negative duration", clipPath(start, "&duration=-2"), "", http.StatusBadRequest, "invalid_duration"},
 		{"end before start", clipPath(start, endParam(start.Add(-time.Second))), "", http.StatusBadRequest, "invalid_request"},
-		{"unsupported format", clipPath(start, "&duration_seconds=1&format=webm"), "", http.StatusUnsupportedMediaType, "unsupported_media"},
-		{"incompatible accept", clipPath(start, "&duration_seconds=1"), "image/jpeg", http.StatusNotAcceptable, "not_acceptable"},
-		{"end beyond coverage", clipPath(start, "&duration_seconds=3600"), "", http.StatusNotFound, "timestamp_out_of_coverage"},
-		{"collapses to one sample", clipPath(start, "&duration_seconds=0.1"), "", http.StatusNotFound, "interval_not_covered"},
-		{"unknown recording", "/v1/replays/rec-404/clip?timestamp_start=" + url.QueryEscape(start.Format(time.RFC3339Nano)) + "&duration_seconds=1", "", http.StatusNotFound, "recording_not_found"},
+		{"unsupported format", clipPath(start, "&duration=1&format=webm"), "", http.StatusUnsupportedMediaType, "unsupported_media"},
+		{"incompatible accept", clipPath(start, "&duration=1"), "image/jpeg", http.StatusNotAcceptable, "not_acceptable"},
+		{"end beyond coverage", clipPath(start, "&duration=3600"), "", http.StatusNotFound, "timestamp_out_of_coverage"},
+		{"collapses to one sample", clipPath(start, "&duration=0.1"), "", http.StatusNotFound, "interval_not_covered"},
+		{"unknown recording", "/v1/replays/rec-404/clip?start_ts=" + url.QueryEscape(start.Format(time.RFC3339Nano)) + "&duration=1", "", http.StatusNotFound, "recording_not_found"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -511,10 +545,10 @@ func TestClipRejectsCoverageGap(t *testing.T) {
 	gapped, _ := json.Marshal(doc)
 	env.media.Set("recordings/rec-001/sidecar.json", gapped)
 
-	decodeError(t, env.do(t, clipPath(fixtureBase.Add(2*time.Second), "&duration_seconds=2"), ""), http.StatusNotFound, "interval_not_covered")
+	decodeError(t, env.do(t, clipPath(fixtureBase.Add(2*time.Second), "&duration=2"), ""), http.StatusNotFound, "interval_not_covered")
 
 	// Ranges on either side of the gap still resolve.
-	if rr := env.do(t, clipPath(fixtureBase, "&duration_seconds=2"), ""); rr.Code != http.StatusOK {
+	if rr := env.do(t, clipPath(fixtureBase, "&duration=2"), ""); rr.Code != http.StatusOK {
 		t.Fatalf("range before gap: %d %s", rr.Code, rr.Body.String())
 	}
 }
@@ -561,7 +595,7 @@ func TestLiveRecordingUnknownSizeReturnsConflict(t *testing.T) {
 
 type routerBufferer struct{}
 
-func (routerBufferer) CreateBuffer(context.Context, string, string) (string, error) {
+func (routerBufferer) CreateBuffer(context.Context, string, string, time.Duration) (string, error) {
 	return "str-test", nil
 }
 func (routerBufferer) GetBuffer(context.Context, string, time.Time, time.Time) ([]model.BufferSlice, error) {
@@ -570,7 +604,7 @@ func (routerBufferer) GetBuffer(context.Context, string, time.Time, time.Time) (
 func (routerBufferer) AcquireBuffer(context.Context, string, time.Time, time.Time) (*stream.BufferLease, error) {
 	return nil, nil
 }
-func (routerBufferer) ResizeBuffer(context.Context, string, int) (model.StreamBuffer, error) {
+func (routerBufferer) ResizeBuffer(context.Context, string, time.Duration) (model.StreamBuffer, error) {
 	return model.StreamBuffer{}, nil
 }
 func (routerBufferer) RemoveBuffer(context.Context, string) error { return nil }

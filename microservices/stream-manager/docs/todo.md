@@ -7,7 +7,8 @@ Items are listed roughly in order of priority.
 ### Major
 - [ ] Implement the `PUT /buffer` endpoint to resize stream buffers
 - [ ] Add S3-compatible storage for videos
-- [ ] Support multiple `stream_ids` in start-recording request bodies
+- [ ] Support live recording writes to S3-compatible storage, including media and sidecar publishing, finalization, recovery, and cleanup
+- [ ] Support multi-stream recording start requests
 
 ### Incremental
 - [ ] Implement support for user supplied config file (located at user home config directory). JSON or YAML preferred.

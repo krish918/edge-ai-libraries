@@ -6,6 +6,7 @@ package record
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"os/exec"
 	"strings"
@@ -21,7 +22,7 @@ import (
 
 type idleBufferer struct{}
 
-func (idleBufferer) CreateBuffer(context.Context, string, string) (string, error) {
+func (idleBufferer) CreateBuffer(context.Context, string, string, time.Duration) (string, error) {
 	return "", nil
 }
 func (idleBufferer) GetBuffer(context.Context, string, time.Time, time.Time) ([]model.BufferSlice, error) {
@@ -30,7 +31,7 @@ func (idleBufferer) GetBuffer(context.Context, string, time.Time, time.Time) ([]
 func (idleBufferer) AcquireBuffer(context.Context, string, time.Time, time.Time) (*stream.BufferLease, error) {
 	return nil, nil
 }
-func (idleBufferer) ResizeBuffer(context.Context, string, int) (model.StreamBuffer, error) {
+func (idleBufferer) ResizeBuffer(context.Context, string, time.Duration) (model.StreamBuffer, error) {
 	return model.StreamBuffer{}, nil
 }
 func (idleBufferer) RemoveBuffer(context.Context, string) error { return nil }
@@ -38,6 +39,43 @@ func (idleBufferer) GetStream(context.Context, string) (model.StreamBuffer, erro
 	return model.StreamBuffer{}, nil
 }
 func (idleBufferer) ListStreams(context.Context) ([]model.StreamBuffer, error) { return nil, nil }
+
+type startProbeBufferer struct {
+	idleBufferer
+	streamID   string
+	acquireErr error
+}
+
+func (b *startProbeBufferer) GetStream(_ context.Context, streamID string) (model.StreamBuffer, error) {
+	b.streamID = streamID
+	return model.StreamBuffer{
+		StreamID: streamID, SensorID: "sensor-1", State: "buffering",
+		SyncConfidence: model.SyncNTPSynced,
+		BufferStat:     model.BufferStat{OldestTS: time.Date(2026, time.October, 4, 11, 0, 0, 0, time.UTC)},
+	}, nil
+}
+
+func (b *startProbeBufferer) AcquireBuffer(context.Context, string, time.Time, time.Time) (*stream.BufferLease, error) {
+	return nil, b.acquireErr
+}
+
+func TestStartLooksUpOneStreamByID(t *testing.T) {
+	wantErr := errors.New("acquire failed")
+	buffers := &startProbeBufferer{acquireErr: wantErr}
+	service := &Service{
+		buffers: buffers, max: 1, jobs: map[string]*job{},
+		now: func() time.Time { return time.Date(2026, time.October, 5, 12, 0, 0, 0, time.UTC) },
+	}
+	_, err := service.Start(context.Background(), StartOptions{
+		StreamID: "str-one", StartTS: time.Date(2026, time.October, 4, 12, 0, 0, 0, time.UTC),
+	})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("Start error = %v, want %v", err, wantErr)
+	}
+	if buffers.streamID != "str-one" {
+		t.Fatalf("looked up stream %q, want str-one", buffers.streamID)
+	}
+}
 
 func TestLiveSidecarWriterEmitsRetrievalCompatibleJSONL(t *testing.T) {
 	recording := model.Recording{RecordingID: "rec-sidecar", RecordingPath: "recordings/rec-sidecar/media.ts"}

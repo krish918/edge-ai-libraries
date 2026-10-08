@@ -1,11 +1,7 @@
 // SPDX-FileCopyrightText: Copyright (C) 2026 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 
-// Package mediaaccess issues and verifies short-lived capability tokens for
-// GET /v1/media/{token}. A token lets a client fetch one specific derived
-// object directly from Stream Manager without ever seeing the underlying
-// storage path (filesystem or otherwise). It never carries the raw
-// filesystem path or a storage credential.
+// Package mediaaccess signs and verifies short-lived media capability tokens.
 package mediaaccess
 
 import (
@@ -69,12 +65,9 @@ func (s *Signer) Sign(key string, expiresAt time.Time) (string, error) {
 	return base64.RawURLEncoding.EncodeToString(raw), nil
 }
 
-// Verify checks a token's signature and expiry and returns the logical
-// derived key it authorizes. Every failure — malformed encoding, a bad
-// signature, or an expired token — is reported without revealing which
-// condition applies, other than distinguishing "expired" (ErrTokenExpired)
-// from "invalid" (ErrInvalidToken) so callers may choose to log
-// differently; both must still map to the same generic HTTP response.
+// Verify validates signature and expiry before returning the authorized key.
+// Callers may distinguish invalid and expired tokens internally, but responses
+// must use the same generic error.
 func (s *Signer) Verify(token string) (string, error) {
 	raw, err := base64.RawURLEncoding.DecodeString(token)
 	if err != nil {

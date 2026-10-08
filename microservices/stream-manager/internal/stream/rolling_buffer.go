@@ -68,7 +68,7 @@ type SliceReader struct {
 	err   error
 }
 
-func newRollingBuffer(directory string, length int) (*RollingBuffer, error) {
+func newRollingBuffer(directory string, length time.Duration) (*RollingBuffer, error) {
 	if err := validateBufferLength(length); err != nil {
 		return nil, err
 	}
@@ -78,14 +78,14 @@ func newRollingBuffer(directory string, length int) (*RollingBuffer, error) {
 	}
 	return &RollingBuffer{
 		root:     root,
-		capacity: time.Duration(length) * time.Second,
+		capacity: length,
 		leases:   make(map[*BufferLease]struct{}),
 		changed:  make(chan struct{}),
 	}, nil
 }
 
-func validateBufferLength(length int) error {
-	if time.Duration(length)*time.Second < config.MinBufferLength || time.Duration(length)*time.Second > config.MaxBufferLength {
+func validateBufferLength(length time.Duration) error {
+	if length < config.MinBufferLength || length > config.MaxBufferLength {
 		return fmt.Errorf("%w: buffer length must be between %d and %d seconds",
 			ErrInvalidRequest, int(config.MinBufferLength/time.Second), int(config.MaxBufferLength/time.Second))
 	}
@@ -473,7 +473,7 @@ func (b *RollingBuffer) expireLocked(now time.Time) error {
 	return result
 }
 
-func (b *RollingBuffer) Resize(length int) error {
+func (b *RollingBuffer) Resize(length time.Duration) error {
 	if err := validateBufferLength(length); err != nil {
 		return err
 	}
@@ -482,15 +482,15 @@ func (b *RollingBuffer) Resize(length int) error {
 	if b.closed {
 		return ErrBufferClosed
 	}
-	if time.Duration(length)*time.Second < b.capacity {
-		cutoff := time.Now().Add(-time.Duration(length) * time.Second)
+	if length < b.capacity {
+		cutoff := time.Now().Add(-length)
 		for _, entry := range b.slices {
 			if len(entry.leases) != 0 && !entry.closedAt.After(cutoff) {
 				return ErrActiveReaders
 			}
 		}
 	}
-	b.capacity = time.Duration(length) * time.Second
+	b.capacity = length
 	return b.expireLocked(time.Now())
 }
 

@@ -11,13 +11,10 @@ import (
 	"time"
 )
 
-// Object key layout. Every object this service reads or writes is addressed
-// with one of these logical keys, relative to the store's configured prefix:
+// Object keys are relative to the configured store prefix:
 //
-//	recordings/{recording_id}/media.mp4
-//	recordings/{recording_id}/sidecar.json
-//	derived/{recording_id}/frames/...
-//	derived/{recording_id}/clips/...
+//	recordings/{id}/media.mp4, recordings/{id}/sidecar.json
+//	derived/{id}/frames/... and derived/{id}/clips/...
 const (
 	recordingsRoot = "recordings"
 	derivedRoot    = "derived"

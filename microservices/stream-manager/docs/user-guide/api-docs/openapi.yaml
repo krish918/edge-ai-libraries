@@ -319,21 +319,21 @@ paths:
             type: string
         - name: start_ts
           in: query
-          description: Keep only records whose covered window overlaps this one; this is its near end. The window is [start_ts, end_ts).
+          description: UTC RFC 3339 timestamp ending in Z. Keep only records whose covered window overlaps this one; this is its near end. The window is [start_ts, end_ts).
           required: false
           schema:
             type: string
             format: date-time
         - name: end_ts
           in: query
-          description: The far end of that same window. It must be later than start_ts when both are supplied.
+          description: UTC RFC 3339 timestamp ending in Z. The far end of that same window. It must be later than start_ts when both are supplied.
           required: false
           schema:
             type: string
             format: date-time
         - name: expiry_ts
           in: query
-          description: Filter by expiry timestamp (e.g., recordings set to expire before this time).
+          description: UTC RFC 3339 timestamp ending in Z. Filter by expiry timestamp (e.g., recordings set to expire before this time).
           required: false
           schema:
             type: string
@@ -440,7 +440,7 @@ paths:
         - $ref: '#/components/parameters/RecordingId'
         - name: timestamp
           in: query
-          description: The time wanted. Must fall inside the record's covered window [start_ts, end_ts).
+          description: UTC RFC 3339 timestamp ending in Z. Must fall inside the record's covered window [start_ts, end_ts).
           required: true
           schema:
             type: string
@@ -546,7 +546,7 @@ paths:
         - $ref: '#/components/parameters/RecordingId'
         - name: timestamp
           in: query
-          description: The time wanted. Must fall inside the record's covered window [start_ts, end_ts).
+          description: UTC RFC 3339 timestamp ending in Z. Must fall inside the record's covered window [start_ts, end_ts).
           required: true
           schema:
             type: string
@@ -630,24 +630,33 @@ paths:
         - $ref: '#/components/parameters/RecordingId'
         - name: start_ts
           in: query
-          description: Where the clip starts, that moment included.
+          description: UTC RFC 3339 timestamp ending in Z. Where the clip starts, that moment included.
           required: true
           schema:
             type: string
             format: date-time
         - name: duration
           in: query
-          description: How long the clip should be in seconds, within the configured limit.
-          required: true
+          description: How long the clip should be in seconds. Provide exactly one of duration or end_ts.
+          required: false
           schema:
             type: number
-        - name: format
+            exclusiveMinimum: true
+            minimum: 0
+        - name: end_ts
           in: query
-          description: Clip format, mp4 (default), mkv or webm.
+          description: UTC RFC 3339 timestamp ending in Z. Exclusive end of the clip. Provide exactly one of duration or end_ts.
           required: false
           schema:
             type: string
-            enum: [mp4, mkv, webm]
+            format: date-time
+        - name: format
+          in: query
+          description: Clip format. Only MP4 is supported.
+          required: false
+          schema:
+            type: string
+            enum: [mp4]
             default: mp4
       responses:
         '200':
@@ -667,14 +676,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/MediaResult'
             video/mp4:
-              schema:
-                type: string
-                format: binary
-            video/x-matroska:
-              schema:
-                type: string
-                format: binary
-            video/webm:
               schema:
                 type: string
                 format: binary
@@ -734,24 +735,33 @@ paths:
         - $ref: '#/components/parameters/RecordingId'
         - name: start_ts
           in: query
-          description: Where the clip starts, that moment included.
+          description: UTC RFC 3339 timestamp ending in Z. Where the clip starts, that moment included.
           required: true
           schema:
             type: string
             format: date-time
         - name: duration
           in: query
-          description: How long the clip should be in seconds, within the configured limit.
-          required: true
+          description: How long the clip should be in seconds. Provide exactly one of duration or end_ts.
+          required: false
           schema:
             type: number
-        - name: format
+            exclusiveMinimum: true
+            minimum: 0
+        - name: end_ts
           in: query
-          description: Clip format, mp4 (default), mkv or webm.
+          description: UTC RFC 3339 timestamp ending in Z. Exclusive end of the clip. Provide exactly one of duration or end_ts.
           required: false
           schema:
             type: string
-            enum: [mp4, mkv, webm]
+            format: date-time
+        - name: format
+          in: query
+          description: Clip format. Only MP4 is supported.
+          required: false
+          schema:
+            type: string
+            enum: [mp4]
             default: mp4
       responses:
         '200':
@@ -1178,7 +1188,7 @@ components:
         start_ts:
           type: string
           format: date-time
-          description: The moment the event happened, called T. It cannot be in the future.
+          description: UTC RFC 3339 timestamp ending in Z. The moment the event happened, called T. It cannot be in the future.
         duration:
           type: number
           description: How many seconds to record after T. Give it for a fixed-length recording, leave it out for an open one that will be ended with stop.

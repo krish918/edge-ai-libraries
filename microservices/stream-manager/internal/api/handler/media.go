@@ -10,8 +10,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/open-edge-platform/edge-ai-libraries/microservices/stream-manager/internal/api/common"
 	"github.com/open-edge-platform/edge-ai-libraries/microservices/stream-manager/internal/mediaaccess"
-	"github.com/open-edge-platform/edge-ai-libraries/microservices/stream-manager/internal/model"
 	"github.com/open-edge-platform/edge-ai-libraries/microservices/stream-manager/internal/storage"
 )
 
@@ -20,8 +20,7 @@ import (
 // never be usable to reach a source recording or sidecar.
 const derivedKeyPrefix = "derived/"
 
-// tokenVerifier decodes and validates a GET /v1/media/{token} capability
-// token. *mediaaccess.Signer implements it.
+// tokenVerifier validates media tokens; mediaaccess.Signer implements it.
 type tokenVerifier interface {
 	Verify(token string) (key string, err error)
 }
@@ -88,9 +87,5 @@ func (h *MediaHandler) GetMedia(c *gin.Context) {
 }
 
 func (h *MediaHandler) writeNotFound(c *gin.Context) {
-	c.JSON(http.StatusNotFound, model.ErrorResponse{
-		Status:       http.StatusNotFound,
-		ErrorCode:    "media_not_found",
-		ErrorDetails: "media not found",
-	})
+	common.WriteError(c, http.StatusNotFound, "media_not_found", "media not found")
 }

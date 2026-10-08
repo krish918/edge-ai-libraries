@@ -25,13 +25,7 @@ type ResolvedRange struct {
 	End   SidecarSample
 }
 
-// TimestampResolver resolves wall-clock timestamps to media samples using a
-// recording's sidecar. It hides the JSON sidecar implementation so a future
-// database/index service can replace it without touching retrieval logic.
-//
-// Both methods take the loaded recording rather than a bare identifier, so
-// the resolver can confirm the sidecar it reads actually describes that
-// recording's media before resolving anything against it.
+// TimestampResolver maps recording timestamps to sidecar media samples.
 type TimestampResolver interface {
 	ResolveFrame(ctx context.Context, recording model.Recording, requested time.Time, match MatchMode) (SidecarSample, error)
 	ResolveRange(ctx context.Context, recording model.Recording, startTS, endTS time.Time, match MatchMode) (ResolvedRange, error)

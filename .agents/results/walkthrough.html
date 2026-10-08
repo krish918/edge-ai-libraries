@@ -1,0 +1,252 @@
+<!-- SPDX-FileCopyrightText: (C) 2026 Intel Corporation -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Stream Manager Code Walkthrough</title>
+  <style>
+    :root { color-scheme: light; --ink:#202b32; --muted:#53636a; --paper:#f5f6f3; --panel:#fff; --line:#d5ddd9; --green:#176b56; --green-soft:#e4f1eb; --blue:#315f78; --blue-soft:#e8f0f4; --gold:#8a5b16; --gold-soft:#f6eedf; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--paper); color:var(--ink); font:16px/1.62 Georgia,"Times New Roman",serif; }
+    header,main,footer { width:min(1100px,calc(100% - 40px)); margin-inline:auto; }
+    header { padding:54px 0 30px; border-bottom:1px solid var(--line); }
+    h1,h2,h3,th,nav,.meta,.callout { font-family:"Aptos","Segoe UI",sans-serif; }
+    h1 { max-width:800px; margin:0; font-size:42px; line-height:1.1; font-weight:650; }
+    h2 { margin:44px 0 12px; padding-top:8px; font-size:27px; line-height:1.25; }
+    h3 { margin:26px 0 8px; font-size:19px; }
+    p { margin:10px 0; }
+    nav { display:flex; flex-wrap:wrap; gap:8px 18px; padding:18px 0 0; font-size:14px; }
+    a { color:var(--blue); text-decoration-thickness:1px; text-underline-offset:3px; }
+    main { padding-bottom:48px; }
+    .meta,footer,.caption { color:var(--muted); }
+    .meta { margin-top:17px; font-size:14px; }
+    .callout { margin:20px 0; padding:14px 18px; border-left:4px solid var(--green); background:var(--green-soft); font-size:15px; }
+    .callout.warn { border-color:var(--gold); background:var(--gold-soft); }
+    .diagram { margin:20px 0 30px; padding:14px; border:1px solid var(--line); background:var(--panel); }
+    .diagram img { display:block; width:100%; height:auto; }
+    .caption { margin:8px 2px 0; font:14px/1.5 "Aptos","Segoe UI",sans-serif; }
+    table { width:100%; margin:14px 0 22px; border-collapse:collapse; background:var(--panel); font-size:14px; }
+    th,td { padding:9px 11px; border:1px solid var(--line); text-align:left; vertical-align:top; }
+    th { background:var(--blue-soft); font-size:13px; }
+    code,pre { font-family:"Cascadia Code",Consolas,monospace; font-size:.9em; }
+    code { padding:1px 4px; background:#edf0ed; border-radius:3px; overflow-wrap:anywhere; }
+    pre { padding:14px 16px; overflow-wrap:anywhere; white-space:pre-wrap; background:#202b32; color:#f2f4f2; border-radius:4px; }
+    pre code { padding:0; background:none; color:inherit; }
+    ul,ol { padding-left:24px; }
+    li { margin:4px 0; }
+    footer { padding:24px 0 40px; border-top:1px solid var(--line); font:13px/1.5 "Aptos","Segoe UI",sans-serif; }
+    @media(max-width:650px) { header,main,footer { width:min(100% - 28px,1100px); } header { padding-top:34px; } h1 { font-size:34px; } h2 { font-size:23px; } .diagram { padding:6px; overflow-x:auto; } .diagram img { min-width:700px; } table { font-size:13px; } th,td { padding:7px; } }
+    @media print { body { background:#fff; font-size:11pt; } header,main,footer { width:100%; } nav { display:none; } h2 { break-after:avoid; } table,.diagram,.callout { break-inside:avoid; } a { color:inherit; } .diagram img { min-width:0; } }
+  </style>
+</head>
+<body>
+<header>
+  <h1>Stream Manager: A Go Walkthrough</h1>
+  <p>A plain-English guide to the current Stream Manager service: how live video becomes a recording, how timestamps become frames and clips, how to build and run it, and what differs from the peer branch.</p>
+  <div class="meta">Compared: current workspace branch <code>feat/stream-manager-pr</code> against <code>krish918/edge-ai-libraries:feat/stream-record-routers</code>. Snapshot date: 2026-10-08.</div>
+  <nav aria-label="Contents"><a href="#purpose">Purpose</a><a href="#go">Go basics</a><a href="#modules">Modules</a><a href="#changes">Peer comparison</a><a href="#interactions">How parts interact</a><a href="#criticality">Critical parts</a><a href="#configuration">Configuration</a><a href="#performance">Performance</a><a href="#caveats">Caveats</a><a href="#build">Build</a><a href="#deployment">Deployment</a></nav>
+</header>
+<main>
+  <section id="purpose">
+    <h2>1. What the Service Does</h2>
+    <p>Stream Manager connects to an RTSP camera, keeps a short rolling history of its video, and writes selected time ranges as recordings. A client can later ask for a still frame or a video clip by wall-clock time. The service looks up the requested time in a sidecar index, runs FFmpeg to produce the requested media, stores that result, and returns either the media bytes or a short-lived URL.</p>
+    <p>The service is an HTTP API, not a camera viewer. It does not discover cameras or provide a user interface. Clients send JSON or query parameters to the API and receive JSON, image bytes, or video bytes.</p>
+    <figure class="diagram"><img src="architecture.svg" alt="High-level Stream Manager architecture and data flows"><figcaption class="caption">Diagram 1. High-level architecture. Arrows show request, video, and storage flows. Filesystem storage is required for live stream and recording operations; S3 is used for archived-media retrieval.</figcaption></figure>
+  </section>
+
+  <section id="go">
+    <h2>2. A Small Go Primer for This Project</h2>
+    <table><thead><tr><th>Go term</th><th>In everyday words</th><th>Example here</th></tr></thead><tbody>
+      <tr><td>Module</td><td>The project and its dependency list.</td><td><code>go.mod</code> declares the Stream Manager module and libraries such as Gin, gortsplib, and the AWS SDK.</td></tr>
+      <tr><td>Package</td><td>A folder of Go files that work together.</td><td><code>internal/stream</code> owns RTSP attachment and the rolling buffer; <code>internal/replay</code> owns timestamp lookup and extraction.</td></tr>
+      <tr><td>Struct</td><td>A named bundle of related data and behavior.</td><td><code>model.Recording</code> carries the recording ID, timestamps, state, path, and metadata.</td></tr>
+      <tr><td>Interface</td><td>A list of methods a value promises to provide. It lets code use a behavior without depending on one implementation.</td><td><code>storage.MediaStore</code> is implemented by filesystem and S3 stores; retrieval can use either through the same methods.</td></tr>
+      <tr><td>Method</td><td>A function attached to a type.</td><td><code>(*RetrievalService).GetFrame</code> performs the domain work for a frame request.</td></tr>
+      <tr><td><code>error</code></td><td>Go returns errors as ordinary values. Callers check them and decide whether to retry, return an HTTP status, or stop startup.</td><td>Handlers translate service errors into stable HTTP error codes instead of returning storage internals.</td></tr>
+      <tr><td><code>context.Context</code></td><td>A request-scoped signal for cancellation and deadlines.</td><td>If a client disconnects or startup times out, database, storage, and FFmpeg work can be stopped.</td></tr>
+      <tr><td>Goroutine</td><td>A lightweight concurrent task.</td><td>Stream ingest and recording workers run while the API continues serving requests; shutdown cancels them and waits.</td></tr>
+    </tbody></table>
+    <p>One useful way to read a Go request path is: find the route, follow the handler, then follow the service method it calls. The handler is the HTTP translator; the service owns the application rules.</p>
+    <pre><code>GET /v1/replays/{recording_id}/frame  →  router.go registers it  →  handler/retrieval.go validates it  →  replay/replay.go resolves and extracts media  →  storage saves or reads it</code></pre>
+  </section>
+
+  <section id="modules">
+    <h2>3. Modules and Which Work They Own</h2>
+    <table><thead><tr><th>Module</th><th>What it does</th><th>Place in the whole service</th></tr></thead><tbody>
+      <tr><td><code>cmd/api-server</code></td><td>Loads settings, opens storage, checks backend health, creates services and routes, starts HTTP, and coordinates graceful shutdown.</td><td>The composition root: connects pieces but does not implement recording or replay rules.</td></tr>
+      <tr><td><code>internal/api</code></td><td>Registers Gin routes. <code>handler</code> contains HTTP handlers; <code>common</code> validates IDs, timestamps, filters, and JSON bodies and writes standard errors.</td><td>Turns HTTP input into typed service calls and results into JSON or media responses.</td></tr>
+      <tr><td><code>internal/stream</code></td><td>Attaches one RTSP video track, relays packets, asks FFmpeg to split the stream at keyframes, tracks timestamps, and manages a bounded rolling buffer with reader leases.</td><td>Provides the short-lived history that makes pre-event recording possible.</td></tr>
+      <tr><td><code>internal/record</code></td><td>Starts fixed-length or manually stopped recording workers. Workers lease buffer slices, write MPEG-TS and a JSONL timing sidecar, probe the result, update metadata, and clean up failures.</td><td>Turns temporary buffered video into a managed recording resource.</td></tr>
+      <tr><td><code>internal/replay</code></td><td>Checks recording state, parses and validates JSON or JSONL sidecars, maps capture timestamps to media time, checks clip coverage, extracts media with FFmpeg, caches derived objects, and prepares URLs.</td><td>Turns a recording and requested time into a frame or clip.</td></tr>
+      <tr><td><code>internal/storage</code></td><td>Defines metadata/media interfaces and implements SQLite metadata, filesystem media, and S3-compatible media.</td><td>Hides persistence technology from stream, record, and replay logic.</td></tr>
+      <tr><td><code>internal/model</code></td><td>Defines recordings, streams, buffer slices, requests, responses, and filters.</td><td>Shared vocabulary passed between handlers and services.</td></tr>
+      <tr><td><code>internal/config</code></td><td>Reads environment variables, applies defaults, and rejects unsupported or unsafe combinations.</td><td>Provides one validated configuration to startup code.</td></tr>
+      <tr><td><code>internal/logging</code></td><td>Configures JSON or text <code>slog</code> logs, request IDs, access logs, and panic recovery.</td><td>Provides request-level diagnostics without changing domain behavior.</td></tr>
+      <tr><td><code>internal/mediaaccess</code></td><td>Signs and verifies expiring HMAC-SHA256 tokens for filesystem media links.</td><td>Allows a client holding a valid capability URL to fetch one derived object.</td></tr>
+      <tr><td><code>docs/user-guide</code>, <code>docs/user-guide/api-docs</code></td><td>Human API and setup guidance plus the OpenAPI description used by the docs route.</td><td>Explains the API and how operators configure it.</td></tr>
+      <tr><td><code>testdata</code> and package tests</td><td>Fixtures and tests for models, validation, storage, sidecars, extraction, stream behavior, and HTTP routes.</td><td>Checks individual rules and the assembled service.</td></tr>
+      <tr><td><code>pkg</code></td><td>Currently contains only a small placeholder package.</td><td>No exported product API is implemented there today.</td></tr>
+    </tbody></table>
+    <h3>From camera packet to stored recording</h3>
+    <ol>
+      <li>A client calls <code>POST /v1/streams</code>. The handler checks the sensor ID and RTSP URI.</li>
+      <li><code>stream.Service</code> connects over RTSP/TCP. The accepted source has one H.264 or H.265 video track; audio is ignored.</li>
+      <li>FFmpeg creates small MPEG-TS slices around keyframes. The buffer tracks each slice's capture-time and media-time bounds in private tmpfs. Old slices expire unless an active recording lease still needs them.</li>
+      <li>A client calls <code>POST /v1/records/start</code>. The recording service checks that requested history is present and timestamp confidence is acceptable, then leases the slices.</li>
+      <li>The worker remuxes those slices into a recording, writes a JSONL sidecar index, runs FFprobe to check the output, and stores state and metadata in SQLite.</li>
+      <li>A client requests a frame or clip. Replay maps capture time to media time using the sidecar, FFmpeg extracts the result, and the media store keeps the derived file for later requests.</li>
+    </ol>
+  </section>
+
+  <section id="changes">
+    <h2>4. What Changed Compared with the Peer Branch</h2>
+    <div class="callout warn"><strong>Comparison note:</strong> this compares the current workspace snapshot with the tip of <a href="https://github.com/krish918/edge-ai-libraries/tree/feat/stream-record-routers/microservices/stream-manager">the linked peer branch</a>. At inspection, the current branch was <code>feat/stream-manager-pr</code> and had many uncommitted edits. The diff covered 65 paths (about 8,091 added and 1,959 removed lines), so those totals include the current working-tree changes; they are not a committed-branch-only summary.</div>
+    <p>The peer branch already contains functional stream attachment, rolling buffering, record start/stop, stream and recording routes, and a recording worker. The changes extend and restructure that work; they are not the first implementation of those capabilities.</p>
+    <table><thead><tr><th>Area</th><th>Peer branch baseline</th><th>Current workspace difference</th></tr></thead><tbody>
+      <tr><td>HTTP API</td><td>Stream and record lifecycle routes were registered under <code>/v1</code>.</td><td>Adds health/version and frame/clip retrieval routes, token-based media fetch, richer response negotiation, and broader error mapping. Existing lifecycle routes gain buffer resizing and more complete resource handling.</td></tr>
+      <tr><td>Replay</td><td>No comparable replay HTTP flow was wired in the peer router.</td><td>Adds sidecar parsing and validation, timestamp-to-media resolution, clip coverage checks, FFmpeg extraction, derived-media reuse, and short-lived URLs.</td></tr>
+      <tr><td>Storage design</td><td>Storage was more concentrated in older store/file/GORM files.</td><td>Replaces that layout with explicit metadata and media interfaces, filesystem and S3-compatible backends, SQLite metadata, key validation, and shared storage test helpers.</td></tr>
+      <tr><td>Stream and recording safety</td><td>Core stream and worker behavior already existed.</td><td>Current versions add or strengthen timestamp confidence, development-only best-effort time, bounds on buffer and recording work, recovery of interrupted recordings, secure storage roots and process locks, and careful cancellation and cleanup.</td></tr>
+      <tr><td>Access and operations</td><td>Earlier startup and request logging were simpler.</td><td>Adds configurable structured request logging, signed media capability tokens, backend startup checks with a deadline, HTTP timeouts and graceful shutdown, environment validation, container/Compose setup, and expanded user/API documentation.</td></tr>
+      <tr><td>Tests</td><td>Tests covered the earlier stream and record baseline.</td><td>Adds coverage for replay, sidecars, metadata, filesystem/S3 storage, media tokens, API behavior, configuration, and startup/integration behavior.</td></tr>
+    </tbody></table>
+    <p>File landmarks: <a href="../../microservices/stream-manager/cmd/api-server/main.go">startup wiring</a>, <a href="../../microservices/stream-manager/internal/api/router.go">current routes</a>, <a href="../../microservices/stream-manager/internal/replay/replay.go">retrieval service</a>, and <a href="../../microservices/stream-manager/internal/storage/media.go">storage contracts</a>. The linked branch URL is the baseline for this comparison.</p>
+  </section>
+
+  <section id="interactions">
+    <h2>5. How the Components Communicate</h2>
+    <p>Inside the process, packages call Go methods through concrete types or interfaces. There is no internal message broker. At the boundaries, the API uses HTTP with JSON requests and responses; media can be returned as binary HTTP bodies. RTSP carries the camera stream, FFmpeg reads and writes media through pipes and files, SQLite stores metadata, and S3-compatible HTTP requests or local filesystem calls store media.</p>
+    <figure class="diagram"><img src="recording-retrieval-sequence.svg" alt="Detailed sequence from stream attachment and recording through frame retrieval"><figcaption class="caption">Diagram 2. A detailed sequence: recording is written from leased rolling-buffer slices; a later retrieval request resolves time through the sidecar before FFmpeg extracts media.</figcaption></figure>
+    <h3>Routes a new user is most likely to follow</h3>
+    <table><thead><tr><th>Task</th><th>Route</th><th>Result</th></tr></thead><tbody>
+      <tr><td>Check API and version</td><td><code>GET /v1/health</code>, <code>GET /v1/version</code></td><td>JSON status/version. Health means the API process answers; backend health is checked at startup.</td></tr>
+      <tr><td>Attach and inspect a camera</td><td><code>POST /v1/streams</code>, <code>GET /v1/streams</code>, <code>GET /v1/streams/{id}</code></td><td>A stream ID, state, buffer coverage, and timing confidence.</td></tr>
+      <tr><td>Record selected video</td><td><code>POST /v1/records/start</code>, <code>POST /v1/records/stop</code></td><td>A recording resource that moves through recording/finalizing to ready or failed.</td></tr>
+      <tr><td>Manage recordings</td><td><code>GET /v1/records</code>, <code>GET /v1/records/{id}</code>, <code>DELETE /v1/records/{id}</code></td><td>Filtered, paginated metadata or deletion of a non-active recording.</td></tr>
+      <tr><td>Get a frame or clip</td><td><code>GET /v1/replays/{id}/frame</code>, <code>GET /v1/replays/{id}/clip</code> and corresponding <code>/url</code> routes</td><td>Binary media when accepted, otherwise a JSON media descriptor. The <code>/url</code> routes always return JSON.</td></tr>
+    </tbody></table>
+  </section>
+
+  <section id="criticality">
+    <h2>6. What Is Critical, and What Happens if It Is Missing?</h2>
+    <table><thead><tr><th>Part</th><th>What it owns</th><th>If it is unavailable</th></tr></thead><tbody>
+      <tr><td>HTTP server and router</td><td>Public API boundary.</td><td>No clients can attach, record, or retrieve via HTTP.</td></tr>
+      <tr><td>RTSP ingest and rolling buffer</td><td>Live source packets and recent history.</td><td>No new live streams or recordings; archived retrieval may still work if storage is healthy.</td></tr>
+      <tr><td>Recording service and FFmpeg/FFprobe</td><td>Converts buffer slices into validated recordings and indexes.</td><td>Recording cannot complete. Existing recordings may still be retrievable, but extraction also requires FFmpeg.</td></tr>
+      <tr><td>SQLite metadata</td><td>Recording identity, lifecycle state, and source media key.</td><td>Startup fails its health check; the service cannot safely locate or manage recordings.</td></tr>
+      <tr><td>Media store</td><td>Source recordings, sidecars, and derived results.</td><td>Startup fails its health check; replay cannot read or publish media.</td></tr>
+      <tr><td>Sidecar resolver</td><td>Maps capture timestamps to the media clock.</td><td>Frame/clip requests fail; the service does not guess timestamps from video alone.</td></tr>
+      <tr><td>Media token signer</td><td>Authorizes filesystem media links.</td><td>Filesystem mode will not start without the secret. S3 normally returns direct presigned links.</td></tr>
+      <tr><td>Logging and docs</td><td>Diagnostics and operator guidance.</td><td>Data operations may work, but troubleshooting and correct setup become harder.</td></tr>
+    </tbody></table>
+  </section>
+
+  <section id="configuration">
+    <h2>7. Configuration and Settings</h2>
+    <p>Settings are read from environment variables by <a href="../../microservices/stream-manager/internal/config/config.go"><code>config.Load</code></a>. Filesystem storage is the default and is required for live stream and recording routes. S3 is for retrieval of media another producer has published.</p>
+    <table><thead><tr><th>Variable</th><th>Default or requirement</th><th>Effect / accepted values</th></tr></thead><tbody>
+      <tr><td><code>STREAM_MANAGER_PORT</code></td><td><code>18080</code></td><td>HTTP listen port; invalid address values fail when the listener starts.</td></tr>
+      <tr><td><code>STREAM_MANAGER_VERSION</code></td><td><code>0.1.0</code></td><td>Free-form version string returned by <code>/v1/version</code>.</td></tr>
+      <tr><td><code>STREAM_MANAGER_LOG_LEVEL</code></td><td><code>info</code></td><td><code>debug</code>, <code>info</code>, <code>warn</code>/<code>warning</code>, or <code>error</code>.</td></tr>
+      <tr><td><code>STREAM_MANAGER_LOG_FORMAT</code></td><td><code>json</code></td><td><code>json</code> or <code>text</code>.</td></tr>
+      <tr><td><code>STREAM_MANAGER_SQLITE_PATH</code></td><td><code>/var/lib/stream-manager/stream-manager.db</code></td><td>Absolute path for metadata; used with either media backend.</td></tr>
+      <tr><td><code>STREAM_MANAGER_STORAGE_BACKEND</code></td><td><code>filesystem</code></td><td>Must be <code>filesystem</code> or <code>s3</code>. Live routes require filesystem mode.</td></tr>
+      <tr><td><code>STREAM_MANAGER_FS_ROOT</code></td><td>Required in filesystem mode</td><td>Absolute root for recording and derived media; use persistent storage.</td></tr>
+      <tr><td><code>STREAM_MANAGER_PUBLIC_BASE_URL</code></td><td>Required in filesystem mode</td><td>Externally reachable service URL used for media links.</td></tr>
+      <tr><td><code>STREAM_MANAGER_MEDIA_TOKEN_SECRET</code></td><td>Required for filesystem; optional for S3</td><td>Non-empty secret used to sign filesystem media URLs. Replace the Compose development value.</td></tr>
+      <tr><td><code>STREAM_MANAGER_FS_MAX_STAGE_BYTES</code></td><td><code>2147483648</code> (2 GiB)</td><td>Positive integer maximum for staging live source media before extraction.</td></tr>
+      <tr><td><code>STREAM_MANAGER_S3_ENDPOINT</code></td><td>Required in S3 mode</td><td>Base URL for the S3-compatible service.</td></tr>
+      <tr><td><code>STREAM_MANAGER_S3_REGION</code></td><td><code>us-east-1</code></td><td>Region used in S3 request signing.</td></tr>
+      <tr><td><code>STREAM_MANAGER_S3_BUCKET</code></td><td><code>stream-manager</code></td><td>Existing bucket; the service does not create it.</td></tr>
+      <tr><td><code>STREAM_MANAGER_S3_PREFIX</code></td><td>Empty</td><td>Optional key namespace to isolate this service's objects.</td></tr>
+      <tr><td><code>STREAM_MANAGER_S3_USE_PATH_STYLE</code></td><td><code>true</code></td><td>Boolean; selects <code>/{bucket}/{key}</code> addressing.</td></tr>
+      <tr><td><code>STREAM_MANAGER_S3_ACCESS_KEY</code> and <code>STREAM_MANAGER_S3_SECRET_KEY</code></td><td>Optional; set together</td><td>Static credentials. If omitted, use the AWS default credential chain.</td></tr>
+      <tr><td><code>STREAM_MANAGER_S3_SESSION_TOKEN</code></td><td>Empty</td><td>Optional token for temporary static credentials.</td></tr>
+      <tr><td><code>STREAM_MANAGER_BUFFER_DIR</code></td><td><code>/dev/shm/stream-manager</code></td><td>Absolute private tmpfs directory, owned by the service user with mode <code>0700</code>.</td></tr>
+      <tr><td><code>STREAM_MANAGER_BUFFER_LENGTH</code></td><td><code>30s</code></td><td>Go duration from <code>5s</code> through <code>300s</code>; default rolling history.</td></tr>
+      <tr><td><code>STREAM_MANAGER_MAX_ACTIVE_RECORDS</code></td><td><code>32</code></td><td>Positive integer limit for simultaneous recording workers.</td></tr>
+      <tr><td><code>STREAM_MANAGER_DEV_BEST_EFFORT_TIMESTAMPS</code></td><td><code>false</code></td><td>Boolean; development fallback to the service clock when RTCP/NTP mapping is missing. Not suitable for production capture-time claims.</td></tr>
+      <tr><td><code>STREAM_MANAGER_DERIVED_TTL</code></td><td><code>15m</code></td><td>Positive Go duration used as the derived-media retention hint.</td></tr>
+      <tr><td><code>STREAM_MANAGER_PRESIGN_EXPIRY</code></td><td><code>5m</code></td><td>Positive Go duration for generated media links.</td></tr>
+    </tbody></table>
+    <p>For Docker Compose, <code>.env.example</code> also defines <code>STREAM_MANAGER_HOST_PORT</code> and <code>STREAM_MANAGER_BUFFER_TMPFS_SIZE</code>. These are Compose substitutions, not settings read by the Go process. Keep the public URL port aligned with the host port.</p>
+  </section>
+
+  <section id="performance">
+    <h2>8. Performance: What Costs Time and Space?</h2>
+    <p>Performance here means how quickly a camera becomes recordable, how long recording and replay extraction take, how many streams and recordings fit on the host, and how much temporary or persistent storage they consume. The service does not claim to improve video quality or inference accuracy.</p>
+    <ul>
+      <li><strong>RTSP and segmentation:</strong> camera bitrate and keyframe spacing affect network use and when buffer slices become available. Ingest copies encoded video instead of re-encoding it.</li>
+      <li><strong>Rolling buffer:</strong> each stream uses tmpfs. Longer windows and higher bitrates consume more memory-backed storage. Active leases keep needed slices from expiring.</li>
+      <li><strong>Recording:</strong> workers copy encoded video into MPEG-TS and write sidecar entries. <code>STREAM_MANAGER_MAX_ACTIVE_RECORDS</code> caps concurrent workers.</li>
+      <li><strong>Replay:</strong> FFmpeg stages source media to a seekable temporary file. Clip extraction re-encodes for accurate boundaries and costs more CPU than a simple copy. Repeated requests for the same resolved time and format can reuse a derived object.</li>
+      <li><strong>Storage:</strong> SQLite uses one writer connection and WAL for small metadata rows; filesystem or S3 carries the larger media objects.</li>
+      <li><strong>Limits:</strong> live source staging defaults to 2 GiB. Derived objects have a retention hint and returned URLs expire; actual cleanup depends on backend behavior and lifecycle configuration.</li>
+    </ul>
+  </section>
+
+  <section id="caveats">
+    <h2>9. Caveats and Edge Cases</h2>
+    <ul>
+      <li>Only RTSP/RTSPS over TCP with one H.264 or H.265 video track is supported. Audio is discarded; URLs containing credentials are rejected.</li>
+      <li>Production timing depends on camera RTCP/NTP mapping. Best-effort mode uses the service host clock and is explicitly a development option.</li>
+      <li>The rolling buffer is temporary. A restart loses attached streams and unrecorded history. Startup finds active recordings left in SQLite, marks them failed, and removes partial media.</li>
+      <li>Timestamp lookup requires a valid sidecar. Capture wall-clock time and media PTS/timescale are kept separate. Invalid, duplicated, unordered, or mismatched index data is rejected.</li>
+      <li>Live recording indexes are keyframe/slice based, so frame lookup has keyframe-level timing rather than an entry for every decoded frame. Live clips need a complete sample after their requested end boundary.</li>
+      <li>Clip output is MP4; frame output is JPEG or PNG. FFmpeg must be available on <code>PATH</code>; recording also needs FFprobe.</li>
+      <li>The API has no general user authentication or authorization. A filesystem media URL is a short-lived bearer capability: anyone who gets it can fetch that derived object until it expires.</li>
+      <li><code>/v1/health</code> means the API answered. SQLite and media backends are checked at startup, not on every health request.</li>
+      <li>Use one process per SQLite database path and filesystem media root. File locks reject another process using the same locations.</li>
+      <li>The current README mentions <code>compose.dev.yaml</code> for SeaweedFS, but that file is absent from the inspected component tree. The checked-in <code>compose.yaml</code> configures filesystem mode.</li>
+      <li>Structured access/error logs exist, but no metrics or tracing package is wired into the request/retrieval path.</li>
+    </ul>
+  </section>
+
+  <section id="build">
+    <h2>10. Build Process</h2>
+    <ol>
+      <li>Install Go 1.26 or later. Install FFmpeg; FFprobe is needed to validate recordings.</li>
+      <li>From <code>microservices/stream-manager</code>, download dependencies using <code>go mod download</code>.</li>
+      <li>Compile with <code>CGO_ENABLED=0 go build ./...</code>.</li>
+      <li>Run package and integration tests with <code>go test ./...</code>. Tests that need optional external media services can skip when those services are unavailable.</li>
+    </ol>
+    <pre><code>cd microservices/stream-manager&#10;go mod download&#10;CGO_ENABLED=0 go build ./...&#10;go test ./...</code></pre>
+    <p><code>go.mod</code> lists Gin for HTTP routing, gortsplib and RTP/media libraries for RTSP, AWS SDK v2 for S3, GORM with a pure-Go SQLite driver for metadata, and supporting libraries for IDs, system calls, and Swagger docs. The Dockerfile builds a static Linux binary in a Go 1.26 stage, then uses a slim Debian runtime with certificates and FFmpeg.</p>
+    <p>There is no component Makefile in the inspected tree. The documented build and test commands are direct Go commands.</p>
+  </section>
+
+  <section id="deployment">
+    <h2>11. Deployment Process</h2>
+    <h3>Docker Compose: local filesystem mode</h3>
+    <ol>
+      <li>Copy <code>.env.example</code> to <code>.env</code>.</li>
+      <li>Replace <code>STREAM_MANAGER_MEDIA_TOKEN_SECRET</code> with a unique secret if the service is reachable by anyone else.</li>
+      <li>Run <code>docker compose up --build -d</code>, then check <code>http://localhost:18080/v1/health</code>.</li>
+      <li>Run <code>docker compose down</code> to stop it. The named volume keeps SQLite and media; tmpfs buffer data disappears when the container stops.</li>
+    </ol>
+    <p>The container runs as unprivileged UID/GID <code>10001</code>. Compose mounts persistent data under <code>/var/lib/stream-manager</code> and private tmpfs at <code>/dev/shm/stream-manager</code> (256 MiB by default, configurable with <code>STREAM_MANAGER_BUFFER_TMPFS_SIZE</code>). Ensure the camera is reachable from the container network.</p>
+    <h3>Direct host run</h3>
+    <p>Set the required filesystem variables, create persistent database/media directories owned by the service account, provision private tmpfs, and run <code>go run ./cmd/api-server</code> from the component directory. The Get Started guide has an end-to-end example.</p>
+    <h3>S3 retrieval deployment</h3>
+    <p>Set <code>STREAM_MANAGER_STORAGE_BACKEND=s3</code>, the endpoint, and an existing bucket. Supply a paired access/secret key or make the AWS default credential chain available. The bucket must contain the expected recording and sidecar objects. S3 mode supports replay retrieval; live stream and recording endpoints return unavailable because live writes require filesystem media support.</p>
+    <div class="callout"><strong>Environment fit:</strong> the checked-in deployment targets Linux containers or Linux hosts with a real private tmpfs, persistent local filesystem access, FFmpeg, and network access to RTSP cameras and any selected object store. The code uses Linux system calls to check tmpfs and take file locks.</div>
+    <p>The component has a Dockerfile and Compose deployment, but no Helm chart in the inspected directory. Run one active instance per local SQLite/media root.</p>
+  </section>
+
+  <section>
+    <h2>12. A Practical Reading Order</h2>
+    <ol>
+      <li>Start with <a href="../../microservices/stream-manager/cmd/api-server/main.go"><code>cmd/api-server/main.go</code></a> to see how everything is assembled.</li>
+      <li>Read <a href="../../microservices/stream-manager/internal/api/router.go"><code>internal/api/router.go</code></a> and one handler to see how HTTP reaches code.</li>
+      <li>Follow <a href="../../microservices/stream-manager/internal/stream/stream.go"><code>internal/stream</code></a> for live input, then <a href="../../microservices/stream-manager/internal/record/record.go"><code>internal/record</code></a> for recording lifecycle.</li>
+      <li>Follow <a href="../../microservices/stream-manager/internal/replay/replay.go"><code>internal/replay</code></a> for timestamp lookup and extraction.</li>
+      <li>Finish with interfaces in <a href="../../microservices/stream-manager/internal/storage/media.go"><code>internal/storage</code></a> and <a href="../../microservices/stream-manager/docs/user-guide/get-started.md"><code>docs/user-guide/get-started.md</code></a>.</li>
+    </ol>
+    <p>To check the current code locally, run <code>cd microservices/stream-manager &amp;&amp; go test ./...</code>. The full Go suite passed while this walkthrough was prepared.</p>
+  </section>
+</main>
+<footer>Source-grounded walkthrough of the Stream Manager files in this workspace. The branch comparison describes the workspace snapshot, including uncommitted changes; check Git history before attributing a change to a commit or author.</footer>
+</body>
+</html>

@@ -35,6 +35,11 @@ func newTestFileStore(t *testing.T) (*FileMediaStore, *stubSigner) {
 	if err != nil {
 		t.Fatalf("NewFileMediaStore: %v", err)
 	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Errorf("close FileMediaStore: %v", err)
+		}
+	})
 	return store, signer
 }
 
@@ -159,6 +164,49 @@ func TestFileMediaStoreRejectsTraversal(t *testing.T) {
 		if err := store.putObject(key, bytes.NewReader(nil)); err == nil {
 			t.Fatalf("key %q: expected put error, got nil", key)
 		}
+	}
+}
+
+func TestFileMediaStoreUsesPrivateRootAndRejectsEscapingSymlink(t *testing.T) {
+	store, _ := newTestFileStore(t)
+	info, err := os.Stat(store.root)
+	if err != nil {
+		t.Fatalf("stat media root: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o700 {
+		t.Fatalf("media root permissions = %04o, want 0700", got)
+	}
+
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(store.root, "recordings")); err != nil {
+		t.Fatalf("create escaping symlink: %v", err)
+	}
+	if _, err := store.OpenRecording(context.Background(), "recordings/rec-001/media.ts"); err == nil {
+		t.Fatal("opened an object through a symlink outside the media root")
+	}
+	if err := store.putObject("recordings/rec-001/media.ts", strings.NewReader("media")); err == nil {
+		t.Fatal("wrote an object through a symlink outside the media root")
+	}
+}
+
+func TestFileMediaStoreLocksRootUntilClose(t *testing.T) {
+	root := t.TempDir()
+	first, err := NewFileMediaStore(root, "http://media.test", &stubSigner{})
+	if err != nil {
+		t.Fatalf("open first store: %v", err)
+	}
+	if _, err := NewFileMediaStore(root, "http://media.test", &stubSigner{}); err == nil {
+		t.Fatal("second store opened the locked media root")
+	}
+	if err := first.Close(); err != nil {
+		t.Fatalf("close first store: %v", err)
+	}
+	second, err := NewFileMediaStore(root, "http://media.test", &stubSigner{})
+	if err != nil {
+		t.Fatalf("reopen media root after releasing lock: %v", err)
+	}
+	if err := second.Close(); err != nil {
+		t.Fatalf("close second store: %v", err)
 	}
 }
 

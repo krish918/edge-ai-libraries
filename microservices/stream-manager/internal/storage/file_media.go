@@ -12,35 +12,33 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/google/uuid"
+	"golang.org/x/sys/unix"
 )
 
-// DerivedURLSigner issues a capability URL that resolves to a derived
-// object through GET /v1/media/{token}, without exposing the underlying
-// filesystem path. internal/mediaaccess.Signer implements this.
+// DerivedURLSigner creates capability URLs for derived media objects.
 type DerivedURLSigner interface {
 	Sign(key string, expiresAt time.Time) (string, error)
 }
 
-// FileMediaStore is a MediaStore backed by a local filesystem directory.
-// It lays objects out exactly like S3MediaStore's logical key space (see
-// keys.go), rooted under a configured directory instead of a bucket:
+// FileMediaStore stores validated logical paths under a private root:
 //
-//	<root>/recordings/{recording_id}/media.{ext}
-//	<root>/recordings/{recording_id}/sidecar.{json,jsonl}
-//	<root>/derived/{recording_id}/frames/...
-//	<root>/derived/{recording_id}/clips/...
-//
-// Every logical key is validated with ValidateObjectKey before it is joined
-// onto root, so a key can never resolve outside root regardless of what a
-// caller (or corrupted metadata) supplies.
+//	recordings/{id}/media.{ext}, recordings/{id}/sidecar.{json,jsonl}
+//	derived/{id}/frames/... and derived/{id}/clips/...
 type FileMediaStore struct {
 	root          string
 	signer        DerivedURLSigner
 	publicBaseURL string
+	lock          *os.File
+	closeOnce     sync.Once
+	closeErr      error
 }
 
 var _ LiveRecordingLifecycleMediaStore = (*FileMediaStore)(nil)
+var _ MediaStore = (*FileMediaStore)(nil)
 
 // NewFileMediaStore builds a FileMediaStore rooted at root, issuing
 // capability URLs of the form "{publicBaseURL}/v1/media/{token}" signed by
@@ -60,32 +58,98 @@ func NewFileMediaStore(root, publicBaseURL string, signer DerivedURLSigner) (*Fi
 	if err != nil {
 		return nil, fmt.Errorf("filesystem: resolve root %q: %w", root, err)
 	}
-	if err := os.MkdirAll(abs, 0o750); err != nil {
+	if err := os.MkdirAll(abs, 0o700); err != nil {
 		return nil, fmt.Errorf("filesystem: create root %q: %w", abs, err)
+	}
+	if err := secureMediaRoot(abs); err != nil {
+		return nil, err
+	}
+	lock, err := acquireMediaStoreLock(abs)
+	if err != nil {
+		return nil, err
 	}
 
 	return &FileMediaStore{
 		root:          abs,
 		signer:        signer,
 		publicBaseURL: strings.TrimRight(publicBaseURL, "/"),
+		lock:          lock,
 	}, nil
 }
 
-// resolvePath validates logicalKey and maps it to an absolute filesystem
-// path under the store's root. It re-checks containment after joining as a
-// defense-in-depth measure: ValidateObjectKey already rejects traversal
-// segments, but a path escaping root would be a critical failure mode, so
-// it is never trusted on a single check alone.
-func (f *FileMediaStore) resolvePath(logicalKey string) (string, error) {
+// acquireMediaStoreLock prevents multiple processes from writing the same media root.
+func acquireMediaStoreLock(root string) (*os.File, error) {
+	path := filepath.Join(root, ".stream-manager.lock")
+	fd, err := unix.Open(path, unix.O_CREAT|unix.O_RDWR|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("filesystem: open media lock: %w", err)
+	}
+	lock := os.NewFile(uintptr(fd), path)
+	info, err := lock.Stat()
+	if err != nil {
+		_ = lock.Close()
+		return nil, fmt.Errorf("filesystem: inspect media lock: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		_ = lock.Close()
+		return nil, errors.New("filesystem: media lock must be a regular file")
+	}
+	if err := lock.Chmod(0o600); err != nil {
+		_ = lock.Close()
+		return nil, fmt.Errorf("filesystem: restrict media lock permissions: %w", err)
+	}
+	if err := unix.Flock(int(lock.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
+		_ = lock.Close()
+		if errors.Is(err, unix.EWOULDBLOCK) || errors.Is(err, unix.EAGAIN) {
+			return nil, errors.New("filesystem media root is already in use by another process")
+		}
+		return nil, fmt.Errorf("filesystem: lock media root: %w", err)
+	}
+	return lock, nil
+}
+
+// Close releases the lock held on this media root.
+func (f *FileMediaStore) Close() error {
+	f.closeOnce.Do(func() {
+		if f.lock != nil {
+			f.closeErr = errors.Join(unix.Flock(int(f.lock.Fd()), unix.LOCK_UN), f.lock.Close())
+		}
+	})
+	return f.closeErr
+}
+
+// secureMediaRoot verifies ownership and restricts the media root to mode 0700.
+func secureMediaRoot(path string) error {
+	fd, err := unix.Open(path, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
+	if err != nil {
+		return fmt.Errorf("filesystem: open media root securely: %w", err)
+	}
+	defer unix.Close(fd)
+
+	var info unix.Stat_t
+	if err := unix.Fstat(fd, &info); err != nil {
+		return fmt.Errorf("filesystem: inspect media root: %w", err)
+	}
+	if info.Mode&unix.S_IFMT != unix.S_IFDIR {
+		return errors.New("filesystem: media root must be a directory")
+	}
+	if info.Uid != uint32(os.Geteuid()) {
+		return errors.New("filesystem: media root must be owned by the service user")
+	}
+	if info.Mode&0o077 != 0 {
+		if err := unix.Fchmod(fd, 0o700); err != nil {
+			return fmt.Errorf("filesystem: restrict media root permissions: %w", err)
+		}
+	}
+	return nil
+}
+
+// resolveKey validates a logical object key and converts it to a root-relative path.
+func resolveKey(logicalKey string) (string, error) {
 	if err := ValidateObjectKey(logicalKey); err != nil {
 		return "", err
 	}
-	full := filepath.Join(f.root, filepath.FromSlash(logicalKey))
-	rel, err := filepath.Rel(f.root, full)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("%w: key %q escapes the store root", ErrInvalidObjectKey, logicalKey)
-	}
-	return full, nil
+	return filepath.FromSlash(logicalKey), nil
 }
 
 func (f *FileMediaStore) OpenRecording(_ context.Context, recordingPath string) (io.ReadCloser, error) {
@@ -113,11 +177,16 @@ func (f *FileMediaStore) OpenDerived(_ context.Context, key string) (io.ReadClos
 }
 
 func (f *FileMediaStore) openObject(logicalKey string) (io.ReadCloser, error) {
-	path, err := f.resolvePath(logicalKey)
+	relative, err := resolveKey(logicalKey)
 	if err != nil {
 		return nil, err
 	}
-	file, err := os.Open(path)
+	root, err := os.OpenRoot(f.root)
+	if err != nil {
+		return nil, fmt.Errorf("open filesystem root: %w", err)
+	}
+	defer root.Close()
+	file, err := root.Open(relative)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, fmt.Errorf("%w: %s", ErrObjectNotFound, logicalKey)
@@ -265,47 +334,65 @@ func (f *FileMediaStore) PutDerived(_ context.Context, key string, media io.Read
 // then atomically renames it into place, so a reader can never observe a
 // partially written object at the final path.
 func (f *FileMediaStore) putObject(logicalKey string, body io.Reader) error {
-	path, err := f.resolvePath(logicalKey)
+	relative, err := resolveKey(logicalKey)
 	if err != nil {
 		return err
 	}
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o750); err != nil {
+	root, err := os.OpenRoot(f.root)
+	if err != nil {
+		return fmt.Errorf("put object %q: open filesystem root: %w", logicalKey, err)
+	}
+	defer root.Close()
+	dir := filepath.Dir(relative)
+	if err := root.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("put object %q: create directory: %w", logicalKey, err)
 	}
 
-	tmp, err := os.CreateTemp(dir, ".stage-*")
+	tmpPath := filepath.Join(dir, ".stage-"+uuid.NewString())
+	tmp, err := root.OpenFile(tmpPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("put object %q: create staging file: %w", logicalKey, err)
 	}
-	tmpPath := tmp.Name()
 	// Always attempt to remove the staging file; after a successful
 	// rename it is already gone, so this is a no-op in the success path.
-	defer os.Remove(tmpPath)
+	defer root.Remove(tmpPath)
 
 	if _, err := io.Copy(tmp, body); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return fmt.Errorf("put object %q: write staging file: %w", logicalKey, err)
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("put object %q: sync staging file: %w", logicalKey, err)
 	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("put object %q: close staging file: %w", logicalKey, err)
 	}
-	if err := os.Rename(tmpPath, path); err != nil {
+	if err := root.Rename(tmpPath, relative); err != nil {
 		return fmt.Errorf("put object %q: publish: %w", logicalKey, err)
 	}
 	return nil
 }
 
 func (f *FileMediaStore) DerivedExists(_ context.Context, key string) (bool, error) {
-	path, err := f.resolvePath(key)
+	relative, err := resolveKey(key)
 	if err != nil {
 		return false, err
 	}
-	if _, err := os.Stat(path); err != nil {
+	root, err := os.OpenRoot(f.root)
+	if err != nil {
+		return false, fmt.Errorf("open filesystem root: %w", err)
+	}
+	defer root.Close()
+	info, err := root.Lstat(relative)
+	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return false, nil
 		}
 		return false, fmt.Errorf("stat object %q: %w", key, err)
+	}
+	if !info.Mode().IsRegular() {
+		return false, fmt.Errorf("stat object %q: not a regular file", key)
 	}
 	return true, nil
 }
@@ -338,12 +425,20 @@ func (f *FileMediaStore) DeleteRecordingObjects(_ context.Context, recordingID s
 	}
 	for _, logicalPrefix := range prefixes {
 		dirKey := strings.TrimSuffix(logicalPrefix, "/")
-		path, err := f.resolvePath(dirKey)
+		relative, err := resolveKey(dirKey)
 		if err != nil {
 			return err
 		}
-		if err := os.RemoveAll(path); err != nil {
+		root, err := os.OpenRoot(f.root)
+		if err != nil {
+			return fmt.Errorf("delete objects under %q: open filesystem root: %w", logicalPrefix, err)
+		}
+		if err := root.RemoveAll(relative); err != nil {
+			_ = root.Close()
 			return fmt.Errorf("delete objects under %q: %w", logicalPrefix, err)
+		}
+		if err := root.Close(); err != nil {
+			return fmt.Errorf("delete objects under %q: close filesystem root: %w", logicalPrefix, err)
 		}
 	}
 	return nil
@@ -352,14 +447,22 @@ func (f *FileMediaStore) DeleteRecordingObjects(_ context.Context, recordingID s
 // Health confirms root exists and is writable by staging and removing a
 // throwaway file inside it.
 func (f *FileMediaStore) Health(_ context.Context) error {
-	probe, err := os.CreateTemp(f.root, ".health-*")
+	root, err := os.OpenRoot(f.root)
+	if err != nil {
+		return fmt.Errorf("filesystem root %q unavailable: %w", f.root, err)
+	}
+	defer root.Close()
+	probePath := ".health-" + uuid.NewString()
+	probe, err := root.OpenFile(probePath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("filesystem root %q not writable: %w", f.root, err)
 	}
-	path := probe.Name()
-	probe.Close()
-	if err := os.Remove(path); err != nil {
-		return fmt.Errorf("filesystem root %q not writable: %w", f.root, err)
+	if err := probe.Close(); err != nil {
+		_ = root.Remove(probePath)
+		return fmt.Errorf("filesystem root %q probe close: %w", f.root, err)
+	}
+	if err := root.Remove(probePath); err != nil {
+		return fmt.Errorf("filesystem root %q probe cleanup: %w", f.root, err)
 	}
 	return nil
 }
