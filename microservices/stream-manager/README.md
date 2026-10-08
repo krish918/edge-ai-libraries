@@ -3,9 +3,8 @@
 Stream Manager attaches to RTSP video sources, keeps a rolling buffer, records selected intervals,
 and serves frames and clips by timestamp.
 
-Live stream and recording operations use the filesystem backend. Recording metadata is stored in
-SQLite. S3-compatible storage supports retrieval of archived recordings that an external producer
-has published. FFmpeg handles recording and frame/clip extraction.
+Live stream, recording, and replay operations use filesystem storage. Recording metadata is stored
+in SQLite. FFmpeg handles recording and frame/clip extraction.
 
 For filesystem deployments, configure absolute paths on persistent storage. The recommended layout
 uses `/var/lib/stream-manager/media` for recordings and derived clips/frames, and
@@ -26,16 +25,15 @@ replay example. See the [API reference](docs/user-guide/api-reference.md) for ro
 responses, and errors. Deployment checks and QA acceptance criteria are in the
 [deployment end-to-end QA guide](docs/user-guide/deployment-e2e-qa.md).
 
-## Build and test
+## Build
 
 ```bash
 go mod download
 CGO_ENABLED=0 go build ./...
-go test ./...
 ```
 
 The SQLite driver is pure Go. FFmpeg and FFprobe must be available on `PATH` to run live recording
-and media extraction. SeaweedFS is optional and is used for S3 development and integration tests.
+and media extraction.
 
 ## Run in Docker
 
@@ -53,5 +51,3 @@ tmpfs and is cleared when the container stops. The example media-token secret is
 development only; replace it with a unique secret before starting a shared deployment. Edit
 `.env` to change the host port or other Compose overrides. If you change the host port, update
 `STREAM_MANAGER_PUBLIC_BASE_URL` to use the same port.
-The existing `compose.dev.yaml` provides SeaweedFS for S3 development and integration tests; it
-does not start the API service.

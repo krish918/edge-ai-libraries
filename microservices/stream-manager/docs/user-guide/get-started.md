@@ -23,8 +23,8 @@ Docker Compose overrides; it is not a complete application configuration file.
 |---|---|---|
 | `STREAM_MANAGER_PORT` | `18080` | HTTP listen port. |
 | `STREAM_MANAGER_VERSION` | `0.1.0` | Value returned by `GET /v1/version`. |
-| `STREAM_MANAGER_SQLITE_PATH` | `/var/lib/stream-manager/stream-manager.db` | Absolute path to SQLite metadata; required with either media backend. |
-| `STREAM_MANAGER_STORAGE_BACKEND` | `filesystem` | Choose `filesystem` or `s3`. Live stream and recording routes require `filesystem`; S3 supports retrieval of archived recordings. |
+| `STREAM_MANAGER_SQLITE_PATH` | `/var/lib/stream-manager/stream-manager.db` | Absolute path to SQLite metadata. |
+| `STREAM_MANAGER_STORAGE_BACKEND` | `filesystem` | Only `filesystem` is supported. |
 
 ### Filesystem media
 
@@ -36,22 +36,6 @@ These settings apply when `STREAM_MANAGER_STORAGE_BACKEND=filesystem`:
 | `STREAM_MANAGER_PUBLIC_BASE_URL` | Required | Public service base URL used to create media links. |
 | `STREAM_MANAGER_MEDIA_TOKEN_SECRET` | Required | Secret used to sign filesystem `/v1/media/{token}` capability links. |
 | `STREAM_MANAGER_FS_MAX_STAGE_BYTES` | `2147483648` (2 GiB) | Maximum source size staged for extraction. Must be positive. |
-
-### S3 media
-
-These settings apply when `STREAM_MANAGER_STORAGE_BACKEND=s3`. S3 supports archived-media retrieval;
-live stream and recording routes remain filesystem-only.
-
-| Variable | Default or requirement | Purpose |
-|---|---|---|
-| `STREAM_MANAGER_S3_ENDPOINT` | Required | S3-compatible service endpoint. |
-| `STREAM_MANAGER_S3_REGION` | `us-east-1` | S3 signing region. |
-| `STREAM_MANAGER_S3_BUCKET` | `stream-manager` | Existing bucket; the service does not create it. |
-| `STREAM_MANAGER_S3_PREFIX` | Empty | Optional object-key namespace within the bucket. |
-| `STREAM_MANAGER_S3_USE_PATH_STYLE` | `true` | Use `/{bucket}/{key}` addressing, as required by some S3-compatible services. |
-| `STREAM_MANAGER_S3_ACCESS_KEY` and `STREAM_MANAGER_S3_SECRET_KEY` | Optional; set together | Static S3 credentials. If omitted, the AWS default credential chain is used. |
-| `STREAM_MANAGER_S3_SESSION_TOKEN` | Empty | Optional session token for temporary static credentials. |
-| `STREAM_MANAGER_MEDIA_TOKEN_SECRET` | Optional | S3 normally returns direct presigned URLs; this configures the service media-token verifier if capability URLs are used. |
 
 ### Streams and recordings
 
@@ -73,7 +57,7 @@ live stream and recording routes remain filesystem-only.
 
 ## Configure and start
 
-Live stream and recording routes require the filesystem backend. Use absolute paths on persistent
+Use absolute paths on persistent
 storage for the database and media. The service account must own these directories and have
 read/write access. The rolling buffer stays on private tmpfs and is not persistent.
 

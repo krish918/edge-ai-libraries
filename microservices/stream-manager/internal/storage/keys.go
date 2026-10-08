@@ -60,7 +60,7 @@ func ValidateIdentifier(kind, id string) error {
 // ValidateObjectKey checks that key is a relative, non-traversing store key.
 // Absolute paths, URI forms (which could redirect reads or writes at another
 // endpoint), and bucket-qualified keys are rejected so a key can never
-// escape the store's configured prefix.
+// escape the store's root.
 func ValidateObjectKey(key string) error {
 	switch {
 	case strings.TrimSpace(key) == "":
@@ -194,7 +194,7 @@ func RecordingObjectPrefixes(recordingID string) ([]string, error) {
 }
 
 // timestampSegment renders an instant as a key segment. Colons are legal in
-// S3 keys but awkward in URLs and shells, so the RFC3339Nano form is
+// object keys but awkward in URLs and shells, so the RFC3339Nano form is
 // flattened to a compact, collision-free encoding that keeps nanosecond
 // precision.
 func timestampSegment(ts time.Time) string {

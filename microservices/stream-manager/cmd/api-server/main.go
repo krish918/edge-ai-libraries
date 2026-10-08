@@ -68,7 +68,7 @@ func run() (result error) {
 	}
 	defer func() { result = errors.Join(result, metadataStore.Close()) }()
 
-	mediaStore, mediaSigner, err := buildMediaStore(ctx, cfg)
+	mediaStore, mediaSigner, err := buildMediaStore(cfg)
 	if err != nil {
 		return fmt.Errorf("configure media store: %w", err)
 	}
@@ -118,9 +118,6 @@ func run() (result error) {
 		"service", "stream-manager",
 		"version", cfg.Version,
 		"storage_backend", cfg.StorageBackend,
-		"s3_endpoint", cfg.S3Endpoint,
-		"s3_bucket", cfg.S3Bucket,
-		"s3_prefix", cfg.S3Prefix,
 		"fs_root", cfg.FSRoot,
 		"sqlite_path", cfg.SQLitePath,
 		"port", cfg.Port,
@@ -171,8 +168,8 @@ func serveHTTP(ctx context.Context, server *http.Server, listener net.Listener, 
 }
 
 // buildMediaStore creates the configured backend and its media URL signer.
-// Filesystem storage requires the signer; S3 normally presigns directly.
-func buildMediaStore(ctx context.Context, cfg config.Config) (storage.MediaStore, *mediaaccess.Signer, error) {
+// Filesystem storage requires the signer.
+func buildMediaStore(cfg config.Config) (storage.MediaStore, *mediaaccess.Signer, error) {
 	var signer *mediaaccess.Signer
 	if strings.TrimSpace(cfg.MediaTokenSecret) != "" {
 		var err error
@@ -185,21 +182,6 @@ func buildMediaStore(ctx context.Context, cfg config.Config) (storage.MediaStore
 	switch cfg.StorageBackend {
 	case config.StorageBackendFilesystem:
 		store, err := storage.NewFileMediaStore(cfg.FSRoot, cfg.PublicBaseURL, signer)
-		if err != nil {
-			return nil, nil, err
-		}
-		return store, signer, nil
-	case config.StorageBackendS3:
-		store, err := storage.NewS3MediaStore(ctx, storage.S3Config{
-			Endpoint:     cfg.S3Endpoint,
-			Region:       cfg.S3Region,
-			Bucket:       cfg.S3Bucket,
-			Prefix:       cfg.S3Prefix,
-			UsePathStyle: cfg.S3UsePathStyle,
-			AccessKey:    cfg.S3AccessKey,
-			SecretKey:    cfg.S3SecretKey,
-			SessionToken: cfg.S3SessionToken,
-		})
 		if err != nil {
 			return nil, nil, err
 		}

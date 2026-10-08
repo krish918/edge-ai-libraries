@@ -6,9 +6,12 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"io"
 	"time"
 )
+
+var ErrObjectNotFound = errors.New("object not found")
 
 // MediaStore abstracts source and derived-media I/O. Implementations map
 // logical keys to backend storage; retrieval opens sources and publishes

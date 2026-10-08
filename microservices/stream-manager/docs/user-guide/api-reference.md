@@ -74,8 +74,7 @@ if a recording still uses the buffer.
 
 ## Recordings
 
-Recording routes require `STREAM_MANAGER_STORAGE_BACKEND=filesystem`. With S3 selected, they return
-`503 storage_unavailable`.
+Recording routes use filesystem storage.
 
 ### Start a recording
 

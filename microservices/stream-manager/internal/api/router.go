@@ -23,7 +23,7 @@ var _ handler.RecordingService = (*record.Service)(nil)
 
 // NewRouter builds the HTTP API as an http.Handler. version is returned by
 // GET /v1/version, and logger receives one access entry per request. Filesystem
-// media requires mediaSigner; nil disables /v1/media, while S3 may presign directly.
+// media requires mediaSigner; nil disables /v1/media.
 func NewRouter(service *replay.RetrievalService, media storage.MediaStore, version string, logger *slog.Logger, mediaSigner *mediaaccess.Signer, buffers stream.Bufferer, recordings *record.Service) http.Handler {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()

@@ -14,8 +14,7 @@ hide_directive-->
 Stream Manager attaches to RTSP video sources, records selected intervals, and serves frames and
 clips by timestamp.
 
-Live recording uses filesystem storage and SQLite metadata. S3-compatible storage supports
-retrieval of archived recordings published by an external producer.
+Recording and replay use filesystem storage and SQLite metadata.
 
 ## Overview
 
