@@ -120,7 +120,7 @@ func run() (result error) {
 		"storage_backend", cfg.StorageBackend,
 		"fs_root", cfg.FSRoot,
 		"sqlite_path", cfg.SQLitePath,
-		"port", cfg.Port,
+		"http_addr", cfg.HTTPAddr,
 	)
 
 	listener, err := net.Listen("tcp", cfg.HTTPAddr)

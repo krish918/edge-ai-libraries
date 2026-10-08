@@ -1,6 +1,7 @@
 # API Reference
 
-The API uses the `/v1` path prefix. The default base URL is `http://localhost:18080`.
+The API uses the `/v1` path prefix. Docker Compose serves it at `http://localhost:18080` by default;
+standalone runs use port `8080` unless configured otherwise.
 Request and response bodies use JSON unless a route returns media bytes.
 
 For a working RTSP example, see [Get Started](get-started.md).

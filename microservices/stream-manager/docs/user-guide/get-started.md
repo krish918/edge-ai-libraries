@@ -21,7 +21,8 @@ Docker Compose overrides; it is not a complete application configuration file.
 
 | Variable | Default or requirement | Purpose |
 |---|---|---|
-| `STREAM_MANAGER_PORT` | `18080` | HTTP listen port. |
+| `STREAM_MANAGER_PORT` | `8080` | HTTP listen port; Docker Compose sets it to `18080`. |
+| `SM_HTTP_ADDR` | Empty | Legacy listen address override (for example, `:8080`); takes precedence over `STREAM_MANAGER_PORT`. |
 | `STREAM_MANAGER_VERSION` | `0.1.0` | Value returned by `GET /v1/version`. |
 | `STREAM_MANAGER_SQLITE_PATH` | `/var/lib/stream-manager/stream-manager.db` | Absolute path to SQLite metadata. |
 | `STREAM_MANAGER_STORAGE_BACKEND` | `filesystem` | Only `filesystem` is supported. |
@@ -32,7 +33,7 @@ These settings apply when `STREAM_MANAGER_STORAGE_BACKEND=filesystem`:
 
 | Variable | Default or requirement | Purpose |
 |---|---|---|
-| `STREAM_MANAGER_FS_ROOT` | Required | Absolute root for recording and derived media. Use persistent storage. |
+| `STREAM_MANAGER_FS_ROOT` | `$HOME/.local/share/stream-manager` | Absolute root for recording and derived media. Use persistent storage. |
 | `STREAM_MANAGER_PUBLIC_BASE_URL` | Required | Public service base URL used to create media links. |
 | `STREAM_MANAGER_MEDIA_TOKEN_SECRET` | Required | Secret used to sign filesystem `/v1/media/{token}` capability links. |
 | `STREAM_MANAGER_FS_MAX_STAGE_BYTES` | `2147483648` (2 GiB) | Maximum source size staged for extraction. Must be positive. |
@@ -43,7 +44,8 @@ These settings apply when `STREAM_MANAGER_STORAGE_BACKEND=filesystem`:
 |---|---|---|
 | `STREAM_MANAGER_BUFFER_DIR` | `/dev/shm/stream-manager` | Private tmpfs directory for rolling stream buffers; must be owned by the service account with mode `0700`. |
 | `STREAM_MANAGER_BUFFER_LENGTH` | `30s`; range `5s` to `5m` | Default rolling-buffer window. Use a Go duration such as `45s` or `2m`. |
-| `STREAM_MANAGER_MAX_ACTIVE_RECORDS` | `32` | Maximum concurrent recording workers; must be positive. |
+| `STREAM_MANAGER_MAX_ACTIVE_RECORDS` | `10` | Maximum concurrent recording workers; must be positive. |
+| `SM_RECORDING_STORAGE` | `10240` (MiB); minimum `5120` | Legacy storage-size setting. Validated but not enforced as a disk quota. |
 | `STREAM_MANAGER_DEV_BEST_EFFORT_TIMESTAMPS` | `false` | Development-only fallback when a source has no usable RTCP/NTP mapping. |
 
 ### Replay and logging
@@ -68,6 +70,7 @@ export DATA_DIR="$HOME/.local/state/stream-manager"
 mkdir -p "$DATA_DIR/media"
 
 export STREAM_MANAGER_STORAGE_BACKEND=filesystem
+export STREAM_MANAGER_PORT=18080
 export STREAM_MANAGER_FS_ROOT="$DATA_DIR/media"
 export STREAM_MANAGER_PUBLIC_BASE_URL=http://localhost:18080
 export STREAM_MANAGER_MEDIA_TOKEN_SECRET='replace-with-a-random-secret'
@@ -102,7 +105,8 @@ Start the API server:
 go run ./cmd/api-server
 ```
 
-The default address is `http://localhost:18080`. In another terminal, set the base URL and source:
+This example listens at `http://localhost:18080`; without the port override, standalone runs listen
+at `http://localhost:8080`. In another terminal, set the base URL and source:
 
 ```bash
 export BASE=http://localhost:18080
