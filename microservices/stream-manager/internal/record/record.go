@@ -78,9 +78,11 @@ type job struct {
 	filename string
 	fixed    bool
 	stopped  bool
-	ctx      context.Context
-	cancel   context.CancelFunc
-	err      error
+	// truncated is set when the storage quota ends the recording early.
+	truncated bool
+	ctx       context.Context
+	cancel    context.CancelFunc
+	err       error
 }
 
 var _ Recorder = (*Service)(nil)
@@ -399,6 +401,10 @@ func (s *Service) run(j *job) {
 	if err == nil {
 		j.record.StartTS, j.record.EndTS = start, &end
 		j.record.State, j.record.SizeBytes, j.record.Codec = "ready", &size, &codec
+		if j.truncated {
+			detail := "truncated: recording storage quota reached"
+			j.record.ErrorDetail = &detail
+		}
 		_, err = s.metadata.UpdateMetadata(ctx, j.record.RecordingID, j.record)
 	}
 	if err != nil {

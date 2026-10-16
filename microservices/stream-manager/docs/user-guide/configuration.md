@@ -30,8 +30,11 @@ This page lists each setting, its purpose, and its default value.
 Stream Manager counts the bytes of each recording and of its frames and clips.
 
 - When the quota is full, `POST /records/start` returns `507` with `storage_full`.
-- When a running recording fills the quota, the recording stops with the state
-  `failed`. Stream Manager deletes its media.
+- When a running recording fills the quota, the recording stops early with the state
+  `ready`. `end_ts` is the end of the last saved video. `error_detail` is
+  `truncated: recording storage quota reached`.
+- When a recording fills the quota before it saves video, the recording stops with the
+  state `failed`. Stream Manager deletes its media.
 - When the quota is full, a new frame or clip request returns `507` with `storage_full`.
 
 Stream Manager does not delete old recordings to make space. To make space, delete

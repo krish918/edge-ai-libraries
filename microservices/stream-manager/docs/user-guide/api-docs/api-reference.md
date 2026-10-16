@@ -151,7 +151,7 @@ One record is one recording of one sensor.
 | `metadata` | object | Whatever metadata the caller supplied, or `{}` if none was. |
 | `creation_ts` | string (date-time) | Record creation time. |
 | `expiry_ts` | string (date-time), nullable | When Stream Manager deletes the recording automatically. It is set when the recording becomes `ready` or `failed` and the deployment sets `RecordingRetention`. It is `null` when no retention is set; the recording then stays until you delete it. |
-| `error_detail` | string, nullable | A short reason, present only when `state` is `failed`. |
+| `error_detail` | string, nullable | A short reason. It is present when `state` is `failed`. It is also present when `state` is `ready` and the storage quota stopped the recording early. |
 
 ```json
 {

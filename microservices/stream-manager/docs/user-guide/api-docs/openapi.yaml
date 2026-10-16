@@ -1335,7 +1335,7 @@ components:
         error_detail:
           type: string
           nullable: true
-          description: A short reason, given only when the state is failed.
+          description: A short reason. Given when the state is failed, and when the state is ready and the storage quota stopped the recording early.
       example:
         recording_id: rec-2
         sensor_id: cam-07
