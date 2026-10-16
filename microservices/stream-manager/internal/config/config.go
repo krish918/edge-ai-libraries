@@ -21,9 +21,11 @@ const (
 	DefaultBufferLength = 30 * time.Second
 	MaxBufferLength     = 300 * time.Second
 	MinBufferLength     = 5 * time.Second
-	DefaultStorageSize  = 10240 // MegaBytes; ~10 GB
-	MinStorageSize      = 5120  // MegaBytes; ~5 GB
+	DefaultStorageSize  = 10240   // MegaBytes; ~10 GB
+	MinStorageSize      = 5120    // MegaBytes; ~5 GB
+	MaxStorageSize      = 1 << 30 // MegaBytes; 1 PiB, keeps the byte count far below int64 overflow
 	ConcurrentRecorders = 10
+	MaxRetentionHours   = 10 * 365 * 24
 )
 
 type Config struct {
@@ -33,6 +35,7 @@ type Config struct {
 	StorageDir           string // Override via config.json or SM_DATA_DIR if set.
 	ConcurrentRecorders  int
 	RecordingStorageSize int
+	RecordingRetention   int // Hours a finished recording is kept; 0 keeps it until deleted.
 }
 
 // Load reads the configuration from config.json (or the file named by SM_CONFIG_FILE),
@@ -84,6 +87,14 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("buffer length can not be less than %v or greater than %v", MinBufferLength, MaxBufferLength)
 	}
 
+	if cfg.RecordingStorageSize < MinStorageSize || cfg.RecordingStorageSize > MaxStorageSize {
+		return Config{}, fmt.Errorf("recording storage size must be between %d and %d MB", MinStorageSize, MaxStorageSize)
+	}
+
+	if cfg.RecordingRetention < 0 || cfg.RecordingRetention > MaxRetentionHours {
+		return Config{}, fmt.Errorf("recording retention must be between 0 and %d hours", MaxRetentionHours)
+	}
+
 	if storageDir, err := expandHome(cfg.StorageDir); err == nil {
 		cfg.StorageDir = storageDir
 	} else {
@@ -94,6 +105,16 @@ func Load() (Config, error) {
 	cfg.BufferDir = DefaultBufferDir
 
 	return cfg, nil
+}
+
+// RecordingStorageBytes returns the recording storage quota in bytes.
+func (c Config) RecordingStorageBytes() int64 {
+	return int64(c.RecordingStorageSize) << 20
+}
+
+// RecordingRetentionPeriod returns how long a finished recording is kept; 0 keeps it until deleted.
+func (c Config) RecordingRetentionPeriod() time.Duration {
+	return time.Duration(c.RecordingRetention) * time.Hour
 }
 
 // hasKey verifies whether the top-level JSON object in data contains a given key.

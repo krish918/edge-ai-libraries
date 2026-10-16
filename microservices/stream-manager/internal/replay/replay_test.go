@@ -106,7 +106,7 @@ func newEnv(t *testing.T, bFrames int) testEnv {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = metadataStore.Close() })
-	mediaStore, err := storage.OpenMediaStore(dir)
+	mediaStore, err := storage.OpenMediaStore(dir, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

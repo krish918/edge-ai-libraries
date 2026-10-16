@@ -150,7 +150,7 @@ One record is one recording of one sensor.
 | `size_bytes` | integer, nullable | Size of the finished media; `null` until `ready`. |
 | `metadata` | object | Whatever metadata the caller supplied, or `{}` if none was. |
 | `creation_ts` | string (date-time) | Record creation time. |
-| `expiry_ts` | string (date-time), nullable | When the recording is due to be deleted; `null` when the deployment default applies. |
+| `expiry_ts` | string (date-time), nullable | When Stream Manager deletes the recording automatically. It is set when the recording becomes `ready` or `failed` and the deployment sets `RecordingRetention`. It is `null` when no retention is set; the recording then stays until you delete it. |
 | `error_detail` | string, nullable | A short reason, present only when `state` is `failed`. |
 
 ```json
@@ -574,6 +574,7 @@ Content-Type: application/json
 | 404 | `stream_not_found` | Unknown stream. |
 | 409 | `history_unavailable` | Requested history unavailable, or the stream is not buffering with NTP-synced timestamps. |
 | 429 | `capacity_exhausted` | Recording capacity reached. |
+| 507 | `storage_full` | The recording storage quota is reached. Delete recordings to free space. |
 
 ### Stop an open recording
 
@@ -861,6 +862,7 @@ X-Exact-Match: false
 | 406 | `not_acceptable` | Incompatible `Accept` header. |
 | 409 | `record_not_ready` | Record not ready. |
 | 429 | `capacity_exhausted` | Extraction capacity reached. |
+| 507 | `storage_full` | The recording storage quota is reached. Delete recordings to free space. |
 | 503 | `storage_unavailable` | Extraction or storage failure. |
 
 ### Get an HTTP link to a frame
@@ -952,6 +954,7 @@ curl -i "http://localhost:8080/v1/replays/rec-2/clip?start_ts=2026-09-16T09:12:0
 | 406 | `not_acceptable` | Incompatible `Accept` header. |
 | 409 | `record_not_ready` | Record not ready. |
 | 429 | `capacity_exhausted` | Extraction capacity reached. |
+| 507 | `storage_full` | The recording storage quota is reached. Delete recordings to free space. |
 | 503 | `storage_unavailable` | Extraction or storage failure. |
 
 ### Get an HTTP link to a clip
@@ -1017,4 +1020,5 @@ X-Content-Type-Options: nosniff
 | `unsupported_media` | 415 | The source is not RTSP/RTSPS H.264/H.265 video. |
 | `capacity_exhausted` | 429 | Capacity limit reached for a stream, recording, or extraction. |
 | `internal_error` | 500 | An unexpected server-side failure. |
+| `storage_full` | 507 | The recording storage quota (`RecordingStorageSize`) is reached. |
 | `storage_unavailable` | 503 | Storage or media processing failed. |

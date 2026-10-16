@@ -291,6 +291,16 @@ paths:
                 status: 429
                 error_code: capacity_exhausted
                 error_detail: recording capacity reached
+        '507':
+          description: The recording storage quota is reached.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                status: 507
+                error_code: storage_full
+                error_detail: recording storage quota reached
 
   /records/stop:
     post:
@@ -601,6 +611,16 @@ paths:
                 status: 429
                 error_code: capacity_exhausted
                 error_detail: extraction capacity reached, retry later
+        '507':
+          description: The recording storage quota is reached.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                status: 507
+                error_code: storage_full
+                error_detail: recording storage quota reached
         '503':
           description: Extraction or storage failure.
           content:
@@ -724,6 +744,16 @@ paths:
                 status: 429
                 error_code: capacity_exhausted
                 error_detail: extraction capacity reached, retry later
+        '507':
+          description: The recording storage quota is reached.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                status: 507
+                error_code: storage_full
+                error_detail: recording storage quota reached
         '503':
           description: Extraction or storage failure.
           content:
@@ -857,6 +887,16 @@ paths:
                 status: 429
                 error_code: capacity_exhausted
                 error_detail: extraction capacity reached, retry later
+        '507':
+          description: The recording storage quota is reached.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                status: 507
+                error_code: storage_full
+                error_detail: recording storage quota reached
         '503':
           description: Extraction or storage failure.
           content:
@@ -978,6 +1018,16 @@ paths:
                 status: 429
                 error_code: capacity_exhausted
                 error_detail: extraction capacity reached, retry later
+        '507':
+          description: The recording storage quota is reached.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                status: 507
+                error_code: storage_full
+                error_detail: recording storage quota reached
         '503':
           description: Extraction or storage failure.
           content:
@@ -1110,6 +1160,7 @@ components:
             - unsupported_media
             - capacity_exhausted
             - internal_error
+            - storage_full
             - storage_unavailable
         error_detail:
           type: string
@@ -1273,7 +1324,7 @@ components:
           type: string
           format: date-time
           nullable: true
-          description: When the recording is due to be deleted; empty when the deployment default applies.
+          description: When Stream Manager deletes the recording automatically. It is set when the recording becomes ready or failed and the deployment sets a retention period; otherwise it is empty and the recording stays until it is deleted.
         error_detail:
           type: string
           nullable: true

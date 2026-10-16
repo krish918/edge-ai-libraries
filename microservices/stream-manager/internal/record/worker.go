@@ -88,6 +88,9 @@ func (s *Service) writeMedia(j *job) (start, end time.Time, size int64, codec st
 			start = slice.Slice.StartTS
 		}
 		end = slice.Slice.EndTS
+		if err := s.media.ReserveMedia(ctx, j.uri, slice.Slice.SizeBytes); err != nil {
+			return start, end, 0, "", errors.Join(err, slice.Close())
+		}
 		_, copyErr := io.Copy(writer, slice)
 		if err := errors.Join(copyErr, slice.Close()); err != nil {
 			return start, end, 0, "", err
