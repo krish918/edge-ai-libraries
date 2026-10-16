@@ -28,7 +28,7 @@ func testStores(t *testing.T) (*MetadataStore, *MediaStore, string) {
 			t.Error(err)
 		}
 	})
-	media, err := OpenMediaStore(dir)
+	media, err := OpenMediaStore(dir, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

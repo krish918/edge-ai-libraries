@@ -30,6 +30,9 @@ func seed(t *testing.T, metadata *storage.MetadataStore, media *storage.MediaSto
 	if err := os.WriteFile(filename, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if _, _, err := media.PutMedia(ctx, uri); err != nil {
+		t.Fatal(err)
+	}
 	rec, err := metadata.CreateMetadata(ctx, model.Recording{
 		RecordingID: recordingID, SensorID: "s", StartTS: time.Unix(1, 0), RecordingPath: uri,
 		State: state, Metadata: map[string]any{}, CreationTS: time.Now(),
@@ -47,7 +50,7 @@ func TestRecoverInterrupted(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = metadata.Close() })
-	media, err := storage.OpenMediaStore(dir)
+	media, err := storage.OpenMediaStore(dir, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,9 +72,7 @@ func TestRecoverInterrupted(t *testing.T) {
 	rec, filename := seed(t, metadata, media, "ready")
 	all = append(all, seeded{rec, filename, "ready"})
 
-	if _, err := NewService(nil, metadata, media, 1); err != nil {
-		t.Fatal(err)
-	}
+	newTestService(t, metadata, media, 0)
 	for _, s := range all {
 		got, err := metadata.GetMetadataByRecordingID(context.Background(), s.rec.RecordingID)
 		if err != nil {
@@ -110,46 +111,51 @@ func TestDeleteOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = metadata.Close() })
-	media, err := storage.OpenMediaStore(dir)
+	media, err := storage.OpenMediaStore(dir, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = media.Close() })
 
 	rec, filename := seed(t, metadata, media, "ready")
-	svc, err := NewService(nil, failingMetadata{metadata}, media, 1)
+	svc := newTestService(t, metadata, failingMedia{media}, 0)
+	if err := svc.DeleteRecording(ctx, rec.RecordingID); !errors.Is(err, ErrCleanup) {
+		t.Fatalf("media failure: %v", err)
+	}
+	if _, err := metadata.GetMetadataByRecordingID(ctx, rec.RecordingID); err != nil {
+		t.Fatalf("row removed before media: %v", err)
+	}
+
+	release, err := media.AcquireMedia(ctx, rec.RecordingPath)
 	if err != nil {
 		t.Fatal(err)
 	}
+	svc = newTestService(t, metadata, media, 0)
+	if err := svc.DeleteRecording(ctx, rec.RecordingID); !errors.Is(err, storage.ErrMediaBusy) {
+		t.Fatalf("busy media: %v", err)
+	}
+	if _, err := os.Stat(filename); err != nil {
+		t.Fatalf("busy media removed: %v", err)
+	}
+	release()
+
+	svc = newTestService(t, failingMetadata{metadata}, media, 0)
 	if err := svc.DeleteRecording(ctx, rec.RecordingID); !errors.Is(err, ErrCleanup) {
 		t.Fatalf("metadata failure: %v", err)
 	}
-	if _, err := metadata.GetMetadataByRecordingID(ctx, rec.RecordingID); err != nil {
-		t.Fatalf("row removed: %v", err)
+	if _, err := os.Stat(filename); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("media kept: %v", err)
 	}
-	if _, err := os.Stat(filename); err != nil {
-		t.Fatalf("media removed before metadata: %v", err)
-	}
-
-	svc, err = NewService(nil, metadata, failingMedia{media}, 1)
-	if err != nil {
-		t.Fatal(err)
-	}
+	svc = newTestService(t, metadata, media, 0)
 	if err := svc.DeleteRecording(ctx, rec.RecordingID); err != nil {
-		t.Fatalf("media failure surfaced: %v", err)
+		t.Fatalf("retry after metadata failure: %v", err)
 	}
 	if _, err := metadata.GetMetadataByRecordingID(ctx, rec.RecordingID); !errors.Is(err, storage.ErrNotFound) {
 		t.Fatalf("row kept: %v", err)
 	}
-	if _, err := os.Stat(filename); err != nil {
-		t.Fatalf("orphan media expected: %v", err)
-	}
 
 	rec, filename = seed(t, metadata, media, "failed")
-	svc, err = NewService(nil, metadata, media, 1)
-	if err != nil {
-		t.Fatal(err)
-	}
+	svc = newTestService(t, metadata, media, 0)
 	if err := svc.DeleteRecording(ctx, rec.RecordingID); err != nil {
 		t.Fatal(err)
 	}

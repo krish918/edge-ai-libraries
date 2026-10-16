@@ -207,3 +207,35 @@ func TestExpandHome(t *testing.T) {
 		t.Fatal("accepted a relative home directory")
 	}
 }
+
+func TestLoadRecordingStorageLimits(t *testing.T) {
+	dir := t.TempDir()
+	chdir(t, dir)
+
+	for _, body := range []string{
+		`{"RecordingStorageSize": 5119}`,
+		`{"RecordingStorageSize": ` + strconv.Itoa(MaxStorageSize+1) + `}`,
+		`{"RecordingStorageSize": 9007199254740993}`,
+		`{"RecordingRetention": -1}`,
+		`{"RecordingRetention": ` + strconv.Itoa(MaxRetentionHours+1) + `}`,
+	} {
+		if err := os.WriteFile(filepath.Join(dir, DefaultConfigFile), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Load(); err == nil {
+			t.Fatalf("accepted %s", body)
+		}
+	}
+
+	const body = `{"RecordingStorageSize": 6000, "RecordingRetention": 48}`
+	if err := os.WriteFile(filepath.Join(dir, DefaultConfigFile), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.RecordingStorageBytes() != 6000<<20 || cfg.RecordingRetentionPeriod() != 48*time.Hour {
+		t.Fatalf("got %d bytes, %v retention", cfg.RecordingStorageBytes(), cfg.RecordingRetentionPeriod())
+	}
+}

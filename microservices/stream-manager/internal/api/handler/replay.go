@@ -18,6 +18,7 @@ import (
 
 	"github.com/open-edge-platform/edge-ai-libraries/microservices/stream-manager/internal/api/common"
 	"github.com/open-edge-platform/edge-ai-libraries/microservices/stream-manager/internal/replay"
+	"github.com/open-edge-platform/edge-ai-libraries/microservices/stream-manager/internal/storage"
 )
 
 // replayWriteTimeout replaces the server write timeout on replay requests
@@ -206,6 +207,8 @@ func writeReplayError(c *gin.Context, err error, clip bool) {
 		common.WriteError(c, http.StatusConflict, "record_not_ready", "record is not ready")
 	case errors.Is(err, replay.ErrBusy):
 		common.WriteError(c, http.StatusTooManyRequests, "capacity_exhausted", "extraction capacity reached, retry later")
+	case errors.Is(err, storage.ErrStorageFull):
+		common.WriteError(c, http.StatusInsufficientStorage, "storage_full", "recording storage quota reached")
 	case errors.Is(err, replay.ErrInvalidRequest):
 		common.WriteError(c, http.StatusBadRequest, "invalid_request", "invalid replay request")
 	case errors.Is(err, context.Canceled):

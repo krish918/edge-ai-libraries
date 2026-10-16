@@ -179,7 +179,12 @@ func writeRecordError(c *gin.Context, err error) {
 		common.WriteError(c, http.StatusConflict, "record_not_ready", "recording cannot be changed in its current state")
 	case errors.Is(err, record.ErrCapacity):
 		common.WriteError(c, http.StatusTooManyRequests, "capacity_exhausted", "recording capacity reached")
+	case errors.Is(err, storage.ErrStorageFull):
+		common.WriteError(c, http.StatusInsufficientStorage, "storage_full", "recording storage quota reached")
+	case errors.Is(err, storage.ErrMediaBusy):
+		common.WriteError(c, http.StatusConflict, "active_dependency", "recording media is in use; retry later")
 	case errors.Is(err, record.ErrCleanup):
+		slog.Error("recording cleanup failed", "error", err)
 		common.WriteError(c, http.StatusServiceUnavailable, "storage_unavailable", "recording cleanup failed; retry later")
 	default:
 		slog.Error("recording operation failed", "error", err)

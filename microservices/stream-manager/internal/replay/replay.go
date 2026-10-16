@@ -108,10 +108,11 @@ func (s *Service) Frame(ctx context.Context, id string, ts time.Time, format, ma
 		return Media{}, err
 	}
 	defer release()
-	tl, err := s.openTimeline(ctx, rec)
+	tl, releaseMedia, err := s.openTimeline(ctx, rec)
 	if err != nil {
 		return Media{}, err
 	}
+	defer releaseMedia()
 	frame, keyframe, err := tl.nearestFrame(ctx, ts)
 	if err != nil {
 		return Media{}, err
@@ -162,10 +163,11 @@ func (s *Service) Clip(ctx context.Context, id string, start time.Time, duration
 		return Media{}, err
 	}
 	defer release()
-	tl, err := s.openTimeline(ctx, rec)
+	tl, releaseMedia, err := s.openTimeline(ctx, rec)
 	if err != nil {
 		return Media{}, err
 	}
+	defer releaseMedia()
 	keyframe, err := tl.keyframeAtOrBefore(ctx, start, nil)
 	if err != nil {
 		return Media{}, err
@@ -251,12 +253,28 @@ func (s *Service) acquire() (func(), error) {
 	}
 }
 
-func (s *Service) openTimeline(ctx context.Context, rec model.Recording) (*timeline, error) {
-	path, err := s.media.OpenMedia(ctx, rec.RecordingPath)
-	if err != nil {
-		return nil, err
+func (s *Service) openTimeline(ctx context.Context, rec model.Recording) (*timeline, func(), error) {
+	release, err := s.media.AcquireMedia(ctx, rec.RecordingPath)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil, ErrNotFound
 	}
-	return newTimeline(ctx, s.ffprobe, path, rec.StartTS)
+	if err != nil {
+		return nil, nil, err
+	}
+	path, err := s.media.OpenMedia(ctx, rec.RecordingPath)
+	if errors.Is(err, fs.ErrNotExist) {
+		err = ErrNotFound
+	}
+	if err != nil {
+		release()
+		return nil, nil, err
+	}
+	tl, err := newTimeline(ctx, s.ffprobe, path, rec.StartTS)
+	if err != nil {
+		release()
+		return nil, nil, err
+	}
+	return tl, release, nil
 }
 
 // derive returns the cached file called name while its TTL holds, otherwise

@@ -35,13 +35,18 @@ Items are listed roughly in order of priority.
 ### Incremental
 - [x] Use of `log/slog` for logging
 - [ ] Check if `ffmpeg` can completely replace `blueviron/mediamtx` and whether it will be an optimal choice. (or vice-versa :O)
-- [ ] Check `cfg.RecordingStorage` quotas and enforce disk limits through host-based notifications or other mechanisms (rolling storage?)
+- [x] Check `cfg.RecordingStorage` quotas and enforce disk limits through host-based notifications or other mechanisms (rolling storage?)
 - [ ] Use `errors.Join()` to combine `recordingFilter` validation errors and similar errors across endpoints
 - [ ] Evaluate whether `DecodeJSON` would be useful as middleware
 - [ ] Optimize request sequences - Should POST /streams be always called before POST /records/start by consumer?
 - [ ] Make the derived media TTL (fixed 15 min for replay frames and clips) configurable via `config.json`
-- [ ] Add a cleanup job that deletes expired derived media in `<recording-dir>/derived/` and expired recordings with all their derived media. A recording's `expiry_ts` always wins: when the recording expires, its derived items are deleted with it even if their own TTL has not run out
+- [x] Add a cleanup job that deletes expired recordings with all their derived media. A recording's `expiry_ts` always wins: when the recording expires, its derived items are deleted with it even if their own TTL has not run out
+- [ ] Extend the cleanup job to delete derived media in `<recording-dir>/derived/` whose own TTL has run out, while the recording itself is still kept
 - [ ] Decide whether `PUT /streams/{stream-id}/buffer` should reject resizing a stream that is in `failed` state, or whether resizing an already-failed stream's buffer should keep succeeding as it does today
+- [ ] Skip the startup scan of recording folders after a clean shutdown. On clean stop, save the quota usage to `.usage.json` with a clean-shutdown mark. On start, load it when the mark exists and then remove the mark; otherwise (crash, `kill -9`, forced container stop) do the full scan as today
+- [ ] Delete leftover `derived/.tmp-*` files at startup; a crash during frame or clip extraction leaves them on disk and in the quota
+- [ ] Add a SQLite index on `expiry_ts` so the expiry cleaner does not scan every recording row each minute
+- [ ] Let the expiry cleaner delete media outside the record service lock (mark the recording as deleting under the lock, delete files after), so slow disks do not delay start/stop/delete requests
 
 ## Research/Exploration
 - [x] Weigh in tradeoffs of using random UUIDs as primary key in the database - should UUIDv7 be used or a shorter UUID or incremental int prefixed to UUIDs.

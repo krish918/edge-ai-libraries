@@ -106,7 +106,7 @@ func newEnv(t *testing.T, bFrames int) testEnv {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = metadataStore.Close() })
-	mediaStore, err := storage.OpenMediaStore(dir)
+	mediaStore, err := storage.OpenMediaStore(dir, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,6 +221,10 @@ func TestFrameErrors(t *testing.T) {
 	rec := env.addRecording(t)
 	recording := env.addRecording(t, func(r *model.Recording) { r.State, r.EndTS = "recording", nil })
 	expired := env.addRecording(t, func(r *model.Recording) { past := time.Now().Add(-time.Second); r.ExpiryTS = &past })
+	deleted := env.addRecording(t)
+	if err := env.mediaStore.DeleteMedia(context.Background(), deleted.RecordingPath); err != nil {
+		t.Fatal(err)
+	}
 	cases := []struct {
 		name   string
 		id     string
@@ -235,6 +239,7 @@ func TestFrameErrors(t *testing.T) {
 		{"not ready", recording.RecordingID, fixtureStart, "jpeg", "nearest", ErrNotReady},
 		{"expired", expired.RecordingID, fixtureStart, "jpeg", "nearest", ErrNotFound},
 		{"unknown", uuid.NewString(), fixtureStart, "jpeg", "nearest", ErrNotFound},
+		{"media deleted", deleted.RecordingID, fixtureStart, "jpeg", "nearest", ErrNotFound},
 		{"bad format", rec.RecordingID, fixtureStart, "mp4", "nearest", ErrInvalidRequest},
 		{"bad match", rec.RecordingID, fixtureStart, "jpeg", "closest", ErrInvalidRequest},
 	}

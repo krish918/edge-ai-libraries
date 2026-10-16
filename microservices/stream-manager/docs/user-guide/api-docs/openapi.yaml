@@ -291,6 +291,16 @@ paths:
                 status: 429
                 error_code: capacity_exhausted
                 error_detail: recording capacity reached
+        '507':
+          description: The recording storage quota is reached.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                status: 507
+                error_code: storage_full
+                error_detail: recording storage quota reached
 
   /records/stop:
     post:
@@ -451,7 +461,7 @@ paths:
     delete:
       tags: [Recording Storage APIs]
       summary: Delete a record
-      description: Deletes the record's metadata and its media. The reply returns once the metadata row is gone; if media deletion then fails, the failure is logged but not returned. If metadata deletion fails, the record remains and the request returns 503. Deleting again, or reading a deleted record, returns 404.
+      description: Deletes the record's media, then its metadata. If either delete fails, the record remains and the request returns 503; send the request again to complete the delete. While a frame or clip extraction uses the media, the request returns 409 with active_dependency. Deleting again, or reading a deleted record, returns 404.
       parameters:
         - $ref: '#/components/parameters/RecordingId'
       responses:
@@ -472,17 +482,24 @@ paths:
                 error_code: recording_not_found
                 error_detail: recording not found
         '409':
-          description: Record is still recording or finalizing.
+          description: Record is still recording or finalizing, or a frame or clip extraction uses its media.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
-              example:
-                status: 409
-                error_code: record_not_ready
-                error_detail: recording cannot be changed in its current state
+              examples:
+                record_not_ready:
+                  value:
+                    status: 409
+                    error_code: record_not_ready
+                    error_detail: recording cannot be changed in its current state
+                active_dependency:
+                  value:
+                    status: 409
+                    error_code: active_dependency
+                    error_detail: recording media is in use; retry later
         '503':
-          description: Metadata deletion failed. The record remains; retry later.
+          description: Media or metadata deletion failed. The record remains; retry later.
           content:
             application/json:
               schema:
@@ -601,6 +618,16 @@ paths:
                 status: 429
                 error_code: capacity_exhausted
                 error_detail: extraction capacity reached, retry later
+        '507':
+          description: The recording storage quota is reached.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                status: 507
+                error_code: storage_full
+                error_detail: recording storage quota reached
         '503':
           description: Extraction or storage failure.
           content:
@@ -724,6 +751,16 @@ paths:
                 status: 429
                 error_code: capacity_exhausted
                 error_detail: extraction capacity reached, retry later
+        '507':
+          description: The recording storage quota is reached.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                status: 507
+                error_code: storage_full
+                error_detail: recording storage quota reached
         '503':
           description: Extraction or storage failure.
           content:
@@ -857,6 +894,16 @@ paths:
                 status: 429
                 error_code: capacity_exhausted
                 error_detail: extraction capacity reached, retry later
+        '507':
+          description: The recording storage quota is reached.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                status: 507
+                error_code: storage_full
+                error_detail: recording storage quota reached
         '503':
           description: Extraction or storage failure.
           content:
@@ -978,6 +1025,16 @@ paths:
                 status: 429
                 error_code: capacity_exhausted
                 error_detail: extraction capacity reached, retry later
+        '507':
+          description: The recording storage quota is reached.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                status: 507
+                error_code: storage_full
+                error_detail: recording storage quota reached
         '503':
           description: Extraction or storage failure.
           content:
@@ -1110,6 +1167,7 @@ components:
             - unsupported_media
             - capacity_exhausted
             - internal_error
+            - storage_full
             - storage_unavailable
         error_detail:
           type: string
@@ -1273,11 +1331,11 @@ components:
           type: string
           format: date-time
           nullable: true
-          description: When the recording is due to be deleted; empty when the deployment default applies.
+          description: When Stream Manager deletes the recording automatically. It is set when the recording becomes ready or failed and the deployment sets a retention period; otherwise it is empty and the recording stays until it is deleted.
         error_detail:
           type: string
           nullable: true
-          description: A short reason, given only when the state is failed.
+          description: A short reason. Given when the state is failed, and when the state is ready and the storage quota stopped the recording early.
       example:
         recording_id: rec-2
         sensor_id: cam-07

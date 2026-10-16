@@ -21,6 +21,7 @@ import (
 	"github.com/open-edge-platform/edge-ai-libraries/microservices/stream-manager/internal/api/common"
 	"github.com/open-edge-platform/edge-ai-libraries/microservices/stream-manager/internal/model"
 	"github.com/open-edge-platform/edge-ai-libraries/microservices/stream-manager/internal/replay"
+	"github.com/open-edge-platform/edge-ai-libraries/microservices/stream-manager/internal/storage"
 )
 
 const testRecordingID = "1f0d3c1e-2b9a-4e43-9f0e-6a3c5b1d2e7f"
@@ -222,6 +223,7 @@ func TestReplayErrors(t *testing.T) {
 		{replay.ErrNotReady, http.StatusConflict, "record_not_ready"},
 		{replay.ErrBusy, http.StatusTooManyRequests, "capacity_exhausted"},
 		{replay.ErrInvalidRequest, http.StatusBadRequest, "invalid_request"},
+		{storage.ErrStorageFull, http.StatusInsufficientStorage, "storage_full"},
 		{fmt.Errorf("%w: FFmpeg: exit status 1: /secret/path", replay.ErrExtraction), http.StatusServiceUnavailable, "storage_unavailable"},
 		{fmt.Errorf("disk on fire"), http.StatusInternalServerError, "internal_error"},
 	}
