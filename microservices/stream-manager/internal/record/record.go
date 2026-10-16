@@ -165,7 +165,9 @@ func (s *Service) expire(ctx context.Context, rec model.Recording) error {
 	if s.closed || s.jobs[rec.RecordingID] != nil {
 		return nil
 	}
-	if err := s.media.DeleteMedia(ctx, rec.RecordingPath); err != nil {
+	if err := s.media.DeleteMedia(ctx, rec.RecordingPath); errors.Is(err, storage.ErrMediaBusy) {
+		return nil
+	} else if err != nil {
 		return err
 	}
 	if err := s.metadata.DeleteMetadata(ctx, rec.RecordingID); err != nil && !errors.Is(err, storage.ErrNotFound) {
@@ -372,11 +374,14 @@ func (s *Service) DeleteRecording(ctx context.Context, id string) error {
 	if rec.State == "recording" || rec.State == "finalizing" || s.jobs[id] != nil {
 		return ErrConflict
 	}
-	if err := s.metadata.DeleteMetadata(ctx, id); err != nil {
+	if err := s.media.DeleteMedia(ctx, rec.RecordingPath); err != nil {
+		if errors.Is(err, storage.ErrMediaBusy) {
+			return err
+		}
 		return fmt.Errorf("%w: %w", ErrCleanup, err)
 	}
-	if err := s.media.DeleteMedia(ctx, rec.RecordingPath); err != nil {
-		slog.Error("recording media left after delete", "recording_id", id, "error", err)
+	if err := s.metadata.DeleteMetadata(ctx, id); err != nil && !errors.Is(err, storage.ErrNotFound) {
+		return fmt.Errorf("%w: %w", ErrCleanup, err)
 	}
 	return nil
 }

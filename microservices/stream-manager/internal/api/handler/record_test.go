@@ -4,6 +4,7 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -23,6 +24,8 @@ func TestRecordErrors(t *testing.T) {
 	}{
 		{storage.ErrStorageFull, http.StatusInsufficientStorage, "storage_full"},
 		{record.ErrCapacity, http.StatusTooManyRequests, "capacity_exhausted"},
+		{storage.ErrMediaBusy, http.StatusConflict, "active_dependency"},
+		{fmt.Errorf("%w: disk gone", record.ErrCleanup), http.StatusServiceUnavailable, "storage_unavailable"},
 	}
 	for _, tc := range cases {
 		rec := httptest.NewRecorder()

@@ -126,3 +126,28 @@ func TestRetentionSetsExpiry(t *testing.T) {
 		t.Fatalf("negative retention accepted: %v", err)
 	}
 }
+
+func TestExpireSkipsMediaInUse(t *testing.T) {
+	ctx := context.Background()
+	metadata, media := openStores(t)
+	past := time.Now().Add(-time.Minute)
+	rec, filename := seedExpiring(t, metadata, media, &past)
+	release, err := media.AcquireMedia(ctx, rec.RecordingPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := newTestService(t, metadata, media, 0)
+	if err := svc.expire(ctx, rec); err != nil {
+		t.Fatalf("busy media must be skipped quietly: %v", err)
+	}
+	if _, err := os.Stat(filename); err != nil {
+		t.Fatalf("media in use deleted: %v", err)
+	}
+	release()
+	if err := svc.expire(ctx, rec); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := metadata.GetMetadataByRecordingID(ctx, rec.RecordingID); !errors.Is(err, storage.ErrNotFound) {
+		t.Fatalf("expired recording kept: %v", err)
+	}
+}

@@ -30,6 +30,7 @@ type MediaHandler interface {
 	PutDerived(ctx context.Context, uri, name string, write func(path string) error) (string, time.Time, error)
 	OpenDerived(ctx context.Context, uri, name string) (*os.File, error)
 	ReserveMedia(ctx context.Context, uri string, size int64) error
+	AcquireMedia(ctx context.Context, uri string) (release func(), err error)
 }
 
 // MediaStore keeps media files in one private UUID directory per recording.
@@ -40,10 +41,12 @@ type MediaStore struct {
 	closeOnce sync.Once
 	closeErr  error
 
-	mu    sync.Mutex
-	limit int64
-	used  int64
-	usage map[string]int64 // bytes charged to each recording directory
+	mu       sync.Mutex
+	limit    int64
+	used     int64
+	usage    map[string]int64 // bytes charged to each recording directory
+	readers  map[string]int   // active leases on each recording directory
+	deleting map[string]bool
 }
 
 var (
@@ -58,7 +61,10 @@ func OpenMediaStore(directory string, limitBytes int64) (*MediaStore, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &MediaStore{root: root, lock: lock, limit: limitBytes, usage: make(map[string]int64)}
+	s := &MediaStore{
+		root: root, lock: lock, limit: limitBytes,
+		usage: make(map[string]int64), readers: make(map[string]int), deleting: make(map[string]bool),
+	}
 	if err := s.loadUsage(); err != nil {
 		return nil, errors.Join(err, s.Close())
 	}
@@ -70,6 +76,7 @@ const derivedDir = "derived"
 var (
 	ErrEmptyMedia  = errors.New("media is empty or invalid")
 	ErrStorageFull = errors.New("recording storage quota reached")
+	ErrMediaBusy   = errors.New("recording media is in use")
 )
 
 func (s *MediaStore) loadUsage() error {
@@ -139,6 +146,38 @@ func (s *MediaStore) ReserveMedia(ctx context.Context, uri string, size int64) e
 		return ErrStorageFull
 	}
 	return s.chargeLocked(filepath.Dir(relative), size)
+}
+
+// AcquireMedia keeps a recording's media from deletion until release is
+// called. Missing or deleting media reports fs.ErrNotExist.
+func (s *MediaStore) AcquireMedia(ctx context.Context, uri string) (func(), error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	relative, err := s.relativeMedia(uri)
+	if err != nil {
+		return nil, err
+	}
+	dir := filepath.Dir(relative)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.deleting[dir] {
+		return nil, fs.ErrNotExist
+	}
+	if _, err := s.root.Lstat(dir); err != nil {
+		return nil, err
+	}
+	s.readers[dir]++
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			if s.readers[dir]--; s.readers[dir] == 0 {
+				delete(s.readers, dir)
+			}
+		})
+	}, nil
 }
 
 // UsedBytes returns the bytes charged to all recordings.
@@ -248,6 +287,13 @@ func (s *MediaStore) DeleteMedia(ctx context.Context, uri string) error {
 		return err
 	}
 	dir := filepath.Dir(relative)
+	s.mu.Lock()
+	if s.readers[dir] > 0 || s.deleting[dir] {
+		s.mu.Unlock()
+		return ErrMediaBusy
+	}
+	s.deleting[dir] = true
+	s.mu.Unlock()
 	removeErr := s.root.RemoveAll(dir)
 	if errors.Is(removeErr, os.ErrNotExist) {
 		removeErr = nil
@@ -255,6 +301,7 @@ func (s *MediaStore) DeleteMedia(ctx context.Context, uri string) error {
 	remaining, sizeErr := s.dirSize(dir)
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	delete(s.deleting, dir)
 	if sizeErr != nil {
 		return errors.Join(removeErr, sizeErr)
 	}

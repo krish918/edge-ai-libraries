@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -111,5 +112,42 @@ func TestMediaWithoutQuota(t *testing.T) {
 	_, uri := prepareTestMedia(t, media)
 	if err := media.ReserveMedia(context.Background(), uri, 1<<40); err != nil {
 		t.Fatalf("unlimited store rejected a reservation: %v", err)
+	}
+}
+
+func TestMediaLease(t *testing.T) {
+	ctx := context.Background()
+	media, err := OpenMediaStore(filepath.Join(t.TempDir(), "storage"), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = media.Close() })
+	filename, uri := prepareTestMedia(t, media)
+	if err := os.WriteFile(filename, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	first, err := media.AcquireMedia(ctx, uri)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := media.AcquireMedia(ctx, uri)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first()
+	first()
+	if err := media.DeleteMedia(ctx, uri); !errors.Is(err, ErrMediaBusy) {
+		t.Fatalf("delete with one lease left: %v", err)
+	}
+	second()
+	if err := media.DeleteMedia(ctx, uri); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filename); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("media kept: %v", err)
+	}
+	if _, err := media.AcquireMedia(ctx, uri); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("lease on deleted media: %v", err)
 	}
 }
