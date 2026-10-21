@@ -169,7 +169,7 @@ func (s *rtspInput) fail(reason string) {
 	})
 }
 
-func openRTSP(ctx context.Context, sourceURI string, onFrame func(bool)) (_ *rtspInput, result error) {
+func openRTSP(ctx context.Context, sourceURI string, onFrame func(bool), onForwarded func(time.Time)) (_ *rtspInput, result error) {
 	u, err := base.ParseURL(sourceURI)
 	if err != nil || (u.Scheme != "rtsp" && u.Scheme != "rtsps") || u.User != nil || u.Host == "" {
 		return nil, ErrUnsupportedSource
@@ -322,6 +322,7 @@ func openRTSP(ctx context.Context, sourceURI string, onFrame func(bool)) (_ *rts
 				return
 			}
 		}
+		onForwarded(ntp.UTC())
 	})
 	if _, err := s.client.Play(nil); err != nil {
 		return nil, fmt.Errorf("%w: play RTSP source", ErrSourceFailed)

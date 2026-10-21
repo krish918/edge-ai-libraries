@@ -478,7 +478,7 @@ keyframes, and `ready` records report those actual bounds.
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `stream_id` | string | yes | The attached stream to record. |
-| `start_ts` | string (date-time) | yes | The moment the event happened (T). Cannot be in the future. |
+| `start_ts` | string (date-time) | yes | The moment the event happened (T), on the source clock. Cannot be later than the newest video frame from the source. |
 | `duration` | number | no | Positive seconds to record after T. Omit for an open recording ended later with `/records/stop`. |
 | `pre_event_duration` | number | no | Seconds of history before T to keep, 0-300, default 0. Must already be in the buffer. |
 | `metadata` | object | no | Arbitrary metadata to store with the record. |
@@ -570,7 +570,7 @@ Content-Type: application/json
 | Status | `error_code` | Meaning |
 |---|---|---|
 | 201 | — | Record accepted in the `recording` state. Acceptance does not mean the media is finished. |
-| 400 | `invalid_request` / `invalid_selector` / `invalid_timestamp` | Malformed body or missing `start_ts` (`invalid_request`); malformed `stream_id` (`invalid_selector`); invalid or future `start_ts` (`invalid_timestamp`); invalid `duration` or `pre_event_duration` (`invalid_request`). |
+| 400 | `invalid_request` / `invalid_selector` / `invalid_timestamp` | Malformed body or missing `start_ts` (`invalid_request`); malformed `stream_id` (`invalid_selector`); invalid `start_ts`, or `start_ts` later than the newest video frame (`invalid_timestamp`); invalid `duration` or `pre_event_duration` (`invalid_request`). |
 | 404 | `stream_not_found` | Unknown stream. |
 | 409 | `history_unavailable` | Requested history unavailable, or the stream is not buffering with NTP-synced timestamps. |
 | 429 | `capacity_exhausted` | Recording capacity reached. |
@@ -580,8 +580,9 @@ Content-Type: application/json
 
 `POST /records/stop`
 
-Stops an open recording. The stop time is fixed and does not move if the request is
-repeated. An already finished recording returns `200` with the current record.
+Stops an open recording. The stop time is the time of the newest video frame from
+the source, on the source clock. The host clock is not used. The stop time is fixed
+and does not move if the request is repeated. An already finished recording returns `200` with the current record.
 
 **Request body — `RecordStop`**
 
@@ -644,6 +645,7 @@ Content-Type: application/json
 | 400 | `invalid_request` | Malformed body or invalid `recording_id`. |
 | 404 | `recording_not_found` | Unknown recording. |
 | 409 | `record_not_ready` | The record is not an active open recording. Repeated stops while finalizing retain the original stop target and return `202`. |
+| 409 | `history_unavailable` | The source sent no video frame after the recording start. |
 
 ### Find records
 
@@ -1019,7 +1021,7 @@ X-Content-Type-Options: nosniff
 |---|---|---|
 | `invalid_request` | 400 | The request is malformed, or its fields contradict each other. |
 | `invalid_selector` | 400 | `stream_id` in `POST /records/start` is missing or malformed. |
-| `invalid_timestamp` | 400 | A timestamp is malformed or out of range. A future `start_ts` in `POST /records/start` also uses this code. A missing `start_ts` there returns `invalid_request`. |
+| `invalid_timestamp` | 400 | A timestamp is malformed or out of range. A `start_ts` in `POST /records/start` that is later than the newest video frame from the source also uses this code. A missing `start_ts` there returns `invalid_request`. |
 | `stream_not_found` | 404 | The stream is unknown or has been detached. |
 | `recording_not_found` | 404 | The recording is unknown or has been deleted. |
 | `frame_not_found` | 404 | The requested frame is not covered, no frame sits at the exact requested time (`match=exact`), no decodable frame is within 5 minutes of the requested time, or a frame file is missing or expired. |

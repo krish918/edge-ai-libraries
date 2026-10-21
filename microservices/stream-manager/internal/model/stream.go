@@ -41,10 +41,11 @@ type BufferSlice struct {
 }
 
 type bufferStat struct {
-	HeldBytes int64
-	Capacity  int
-	OldestTS  time.Time
-	NewestTS  time.Time
+	HeldBytes  int64
+	Capacity   int
+	OldestTS   time.Time
+	NewestTS   time.Time
+	LiveEdgeTS time.Time
 }
 
 type frameStat struct {

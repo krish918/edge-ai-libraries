@@ -52,7 +52,7 @@ func runIngest(ctx context.Context, executable, source string, buffer *RollingBu
 	defer cancel()
 	startup := time.AfterFunc(timeout, cancel)
 	defer startup.Stop()
-	input, err := openRTSP(ctx, source, onFrame)
+	input, err := openRTSP(ctx, source, onFrame, buffer.advanceLiveEdge)
 	if err != nil {
 		return err
 	}

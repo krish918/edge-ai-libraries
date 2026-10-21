@@ -172,7 +172,9 @@ func TestRecordingEndToEnd(t *testing.T) {
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build application: %v\n%s", err, output)
 	}
-	source, _, stopSource := testPublisherWithStop(t, "h264", true, time.Now().UTC().Truncate(time.Second))
+	// The source clock runs ahead of the host, like a camera with its own clock.
+	sourceClockAhead := 3 * time.Minute
+	source, _, stopSource := testPublisherWithStop(t, "h264", true, time.Now().UTC().Truncate(time.Second).Add(sourceClockAhead))
 	home := t.TempDir()
 	storageDir := filepath.Join(home, ".local", "share", "stream-manager")
 	baseURL, stopApp := startTestApp(t, executable, home)
@@ -272,6 +274,12 @@ func TestRecordingEndToEnd(t *testing.T) {
 	request("POST", "/records/start", map[string]any{
 		"stream_id": attached.ID, "start_ts": attached.Buffer.Oldest.Add(-time.Second),
 	}, 409)
+	data, _ = request("POST", "/records/start", map[string]any{
+		"stream_id": attached.ID, "start_ts": attached.Buffer.Newest.Add(time.Minute),
+	}, 400)
+	if !strings.Contains(string(data), `"invalid_timestamp"`) {
+		t.Fatalf("start_ts after the newest frame was not rejected as a timestamp: %s", data)
+	}
 	data, _ = request("GET", "/records", nil, 200)
 	var page struct {
 		Items []recordingWire `json:"items"`
@@ -284,6 +292,10 @@ func TestRecordingEndToEnd(t *testing.T) {
 	data, _ = request("POST", "/records/stop", map[string]string{"recording_id": open.ID}, 202)
 	var stopped recordingWire
 	decode(data, &stopped)
+	if stopped.End == nil || !stopped.End.After(event) ||
+		stopped.End.Before(time.Now().Add(sourceClockAhead-time.Minute)) {
+		t.Fatalf("stop target does not use the source clock: %s", data)
+	}
 	data, repeatedStatus := request("POST", "/records/stop", map[string]string{"recording_id": open.ID}, 200, 202)
 	var repeated recordingWire
 	decode(data, &repeated)

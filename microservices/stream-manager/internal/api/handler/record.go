@@ -73,7 +73,7 @@ func (h RecordHandler) Start(c *gin.Context) {
 		common.WriteError(c, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
-	startTS, code, err := req.validate(time.Now())
+	startTS, code, err := req.validate()
 	if err != nil {
 		common.WriteError(c, http.StatusBadRequest, code, err.Error())
 		return
@@ -173,6 +173,8 @@ func writeRecordError(c *gin.Context, err error) {
 		common.WriteError(c, http.StatusNotFound, "stream_not_found", "stream is not attached")
 	case errors.Is(err, stream.ErrHistoryUnavailable), errors.Is(err, stream.ErrSliceExpired):
 		common.WriteError(c, http.StatusConflict, "history_unavailable", "requested history is not available")
+	case errors.Is(err, record.ErrFutureStart):
+		common.WriteError(c, http.StatusBadRequest, "invalid_timestamp", "start_ts must not be after the newest received video frame")
 	case errors.Is(err, record.ErrInvalidRequest), errors.Is(err, storage.ErrInvalidFilter):
 		common.WriteError(c, http.StatusBadRequest, "invalid_request", "invalid recording request or filter")
 	case errors.Is(err, record.ErrConflict):
@@ -222,7 +224,7 @@ func utcPtr(t *time.Time) *time.Time {
 
 // validate checks the request and returns the parsed start_ts, or the
 // error_code and reason for rejecting it.
-func (r *recordStartRequest) validate(now time.Time) (time.Time, string, error) {
+func (r *recordStartRequest) validate() (time.Time, string, error) {
 	if err := common.CheckID("stream_id", r.StreamID); err != nil {
 		return time.Time{}, "invalid_selector", err
 	}
@@ -232,9 +234,6 @@ func (r *recordStartRequest) validate(now time.Time) (time.Time, string, error) 
 	startTS, err := common.ParseTimestamp("start_ts", *r.StartTS)
 	if err != nil {
 		return time.Time{}, "invalid_timestamp", err
-	}
-	if startTS.After(now) {
-		return time.Time{}, "invalid_timestamp", errors.New("start_ts must not be in the future")
 	}
 	if r.Duration != nil && *r.Duration <= 0 {
 		return time.Time{}, "invalid_request", errors.New("duration must be greater than 0")

@@ -234,7 +234,7 @@ paths:
         | Field | Type | Required | Unit / range |
         |---|---|---|---|
         | stream_id | string | yes | — |
-        | start_ts | string (date-time) | yes | RFC 3339 UTC timestamp, cannot be in the future |
+        | start_ts | string (date-time) | yes | RFC 3339 UTC timestamp on the source clock, cannot be later than the newest video frame |
         | duration | number | no | positive seconds, fixed-length recording when given |
         | pre_event_duration | number | no | seconds, 0-300, default 0 |
         | metadata | object | no | arbitrary key-value pairs |
@@ -252,7 +252,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/RecordStartResult'
         '400':
-          description: Missing or malformed stream_id (invalid_selector), missing start_ts or invalid duration/pre_event_duration (invalid_request), or malformed or future start_ts (invalid_timestamp).
+          description: Missing or malformed stream_id (invalid_selector), missing start_ts or invalid duration/pre_event_duration (invalid_request), or malformed start_ts or start_ts later than the newest video frame (invalid_timestamp).
           content:
             application/json:
               schema:
@@ -260,7 +260,7 @@ paths:
               example:
                 status: 400
                 error_code: invalid_timestamp
-                error_detail: start_ts must not be in the future
+                error_detail: start_ts must not be after the newest received video frame
         '404':
           description: Unknown stream.
           content:
@@ -307,7 +307,7 @@ paths:
       tags: [Recording Storage APIs]
       summary: Stop an open recording
       description: |-
-        Stops an open recording. The stop time is fixed and does not move if the request is repeated. An already finished recording returns 200 with the current record.
+        Stops an open recording. The stop time is the time of the newest video frame from the source, on the source clock. The host clock is not used. The stop time is fixed and does not move if the request is repeated. An already finished recording returns 200 with the current record.
 
         | Field | Type | Required | Unit / range |
         |---|---|---|---|
@@ -352,7 +352,7 @@ paths:
                 error_code: recording_not_found
                 error_detail: recording not found
         '409':
-          description: The record is not an active open recording. Repeated stops while finalizing retain the original stop target and return 202.
+          description: The record is not an active open recording (record_not_ready), or the source sent no video frame after the recording start (history_unavailable). Repeated stops while finalizing retain the original stop target and return 202.
           content:
             application/json:
               schema:
@@ -1416,7 +1416,7 @@ components:
         start_ts:
           type: string
           format: date-time
-          description: The event time (T), as RFC 3339 UTC ending in Z with at most 9 fractional digits. Missing or future times are not accepted.
+          description: The event time (T), as RFC 3339 UTC ending in Z with at most 9 fractional digits. Use the source clock. Missing times, and times later than the newest video frame from the source, are not accepted.
         duration:
           type: number
           description: Positive seconds to record after T. Give it for a fixed-length recording; leave it out for an open one that will be ended with stop.
