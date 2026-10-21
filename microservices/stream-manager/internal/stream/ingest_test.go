@@ -16,21 +16,24 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/bluenviron/gortsplib/v5"
 	"github.com/bluenviron/gortsplib/v5/pkg/base"
+	"github.com/bluenviron/gortsplib/v5/pkg/description"
 	"github.com/bluenviron/gortsplib/v5/pkg/format"
 	"github.com/bluenviron/mediacommon/v2/pkg/codecs/h264"
 	"github.com/pion/rtcp"
+	"github.com/pion/rtp"
 
 	"github.com/open-edge-platform/edge-ai-libraries/microservices/stream-manager/internal/config"
 	"github.com/open-edge-platform/edge-ai-libraries/microservices/stream-manager/internal/model"
 )
 
 func TestRelayDescription(t *testing.T) {
-	relay, err := newVideoRelay(&format.H264{PayloadTyp: 96, PacketizationMode: 1}, func() {})
+	relay, err := newVideoRelay(&format.H264{PayloadTyp: 96, PacketizationMode: 1}, func() {}, func() {})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,6 +61,58 @@ func TestRelayDescription(t *testing.T) {
 	}
 	if len(desc.Medias) != 1 {
 		t.Fatalf("unexpected relay description: %+v", desc)
+	}
+}
+
+// TestRelayCarriesLargeFrameBurst sends one frame split into more RTP packets
+// than the library's default queue holds, as a large keyframe arrives.
+func TestRelayCarriesLargeFrameBurst(t *testing.T) {
+	const burst = 2000
+	var writeErrors atomic.Int64
+	relay, err := newVideoRelay(&format.H264{PayloadTyp: 96, PacketizationMode: 1}, func() {}, func() { writeErrors.Add(1) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer relay.close()
+	u, err := base.ParseURL(relay.url())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tcp := gortsplib.ProtocolTCP
+	client := &gortsplib.Client{Scheme: u.Scheme, Host: u.Host, Protocol: &tcp}
+	if err := client.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	desc, _, err := client.Describe(u)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.SetupAll(desc.BaseURL, desc.Medias); err != nil {
+		t.Fatal(err)
+	}
+	var received atomic.Int64
+	client.OnPacketRTPAny(func(*description.Media, format.Format, *rtp.Packet) { received.Add(1) })
+	if _, err := client.Play(nil); err != nil {
+		t.Fatal(err)
+	}
+	payload := make([]byte, 1400)
+	ntp := time.Now()
+	for i := range burst {
+		packet := &rtp.Packet{
+			Header:  rtp.Header{Version: 2, PayloadType: 96, SequenceNumber: relay.sequenceOrigin + uint16(i), Timestamp: relay.timestampOrigin, Marker: i == burst-1},
+			Payload: payload,
+		}
+		if err := relay.stream.WritePacketRTPWithNTP(relay.media, packet, ntp); err != nil {
+			t.Fatal(err)
+		}
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for received.Load() < burst && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got, dropped := received.Load(), writeErrors.Load(); got != burst || dropped != 0 {
+		t.Fatalf("received %d of %d packets, %d write errors", got, burst, dropped)
 	}
 }
 
@@ -155,7 +210,7 @@ func testPublisherWithTiming(t *testing.T, codec string, sendNTP bool, baseNTP t
 		t.Fatal(err)
 	}
 	adapter.frozen = true
-	relay, err := newVideoRelay(adapter.local, func() {})
+	relay, err := newVideoRelay(adapter.local, func() {}, func() {})
 	if err != nil {
 		t.Fatal(err)
 	}
