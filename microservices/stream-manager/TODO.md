@@ -38,7 +38,7 @@ Items are listed roughly in order of priority.
 - [x] Check `cfg.RecordingStorage` quotas and enforce disk limits through host-based notifications or other mechanisms (rolling storage?)
 - [x] Use `errors.Join()` to combine `recordingFilter` validation errors
 - [ ] Use `errors.Join()` to combine similar validation errors in other endpoints (stream, record start/stop, replay)
-- [ ] Evaluate whether `DecodeJSON` would be useful as middleware
+- [x] Evaluate whether `DecodeJSON` would be useful as middleware — evaluated, not needed. Each endpoint decodes a different request type, so middleware would need generics or context passing for four short call sites. Moved `DecodeJSON` from `middleware.go` to `decode.go`.
 - [ ] Optimize request sequences - Should POST /streams be always called before POST /records/start by consumer?
 - [x] Make the derived media TTL (fixed 15 min for replay frames and clips) configurable via `config.json`
 - [x] Add a cleanup job that deletes expired recordings with all their derived media. A recording's `expiry_ts` always wins: when the recording expires, its derived items are deleted with it even if their own TTL has not run out
