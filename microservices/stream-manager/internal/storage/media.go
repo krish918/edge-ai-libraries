@@ -71,7 +71,10 @@ func OpenMediaStore(directory string, limitBytes int64) (*MediaStore, error) {
 	return s, nil
 }
 
-const derivedDir = "derived"
+const (
+	derivedDir        = "derived"
+	tempDerivedPrefix = ".tmp-"
+)
 
 var (
 	ErrEmptyMedia  = errors.New("media is empty or invalid")
@@ -343,7 +346,7 @@ func (s *MediaStore) PutDerived(ctx context.Context, uri, name string,
 	if err := s.root.Mkdir(dir, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
 		return "", time.Time{}, err
 	}
-	tmp := filepath.Join(dir, ".tmp-"+rand.Text()+filepath.Ext(name))
+	tmp := filepath.Join(dir, tempDerivedPrefix+rand.Text()+filepath.Ext(name))
 	file, err := s.root.OpenFile(tmp, os.O_CREATE|os.O_EXCL|os.O_WRONLY|unix.O_NOFOLLOW, 0o600)
 	if err != nil {
 		return "", time.Time{}, err
