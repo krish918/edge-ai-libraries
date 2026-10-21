@@ -9,6 +9,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -83,12 +84,22 @@ func TestSchemaSerializationAndReopen(t *testing.T) {
 	if err := metadata.db.Raw("PRAGMA index_list('recordings')").Scan(&indexes).Error; err != nil {
 		t.Fatal(err)
 	}
-	found := false
+	found := map[string]bool{}
 	for _, index := range indexes {
-		found = found || index.Name == "idx_recordings_sensor_stream"
+		found[index.Name] = true
 	}
-	if !found {
-		t.Fatal("agreed sensor/stream index is missing")
+	for _, name := range []string{"idx_recordings_sensor_stream", "idx_recordings_expiry"} {
+		if !found[name] {
+			t.Fatalf("index %s is missing", name)
+		}
+	}
+	var plan []struct{ Detail string }
+	if err := metadata.db.Raw("EXPLAIN QUERY PLAN SELECT * FROM recordings WHERE expiry_ts <= ? "+
+		"ORDER BY creation_ts DESC, recording_id ASC LIMIT 101", time.Now().UnixNano()).Scan(&plan).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(plan) == 0 || !strings.Contains(plan[0].Detail, "idx_recordings_expiry") {
+		t.Fatalf("expiry query does not use idx_recordings_expiry: %+v", plan)
 	}
 	if _, err := OpenMetadataStore(dir); err == nil {
 		t.Fatal("second instance acquired the same metadata storage")
