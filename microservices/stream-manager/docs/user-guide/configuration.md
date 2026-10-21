@@ -49,7 +49,7 @@ recordings or set `RecordingRetention`.
 
 When `RecordingRetention` is more than `0`, Stream Manager sets `expiry_ts` on each
 recording when the recording becomes `ready` or `failed`. Stream Manager checks for
-expired recordings one time each minute and deletes them. Replay requests for an
+expired recordings one time each minute and deletes them. Retrieve requests for an
 expired recording return `404`.
 
 If you change `RecordingRetention` to `0`, new recordings get no `expiry_ts`.
