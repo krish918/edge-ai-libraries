@@ -145,6 +145,11 @@ func testPublisherAt(t *testing.T, codec string, sendNTP bool, baseNTP time.Time
 
 func testPublisherWithStop(t *testing.T, codec string, sendNTP bool, baseNTP time.Time) (string, time.Time, func()) {
 	t.Helper()
+	return testPublisherWithTiming(t, codec, sendNTP, baseNTP, func(pts int64) int64 { return pts })
+}
+
+func testPublisherWithTiming(t *testing.T, codec string, sendNTP bool, baseNTP time.Time, timing func(int64) int64) (string, time.Time, func()) {
+	t.Helper()
 	packets, adapter := videoFixture(t, codec)
 	if _, _, err := adapter.prepare(packets[0].au, false); err != nil {
 		t.Fatal(err)
@@ -176,6 +181,7 @@ func testPublisherWithStop(t *testing.T, codec string, sendNTP bool, baseNTP tim
 				case <-ticker.C:
 				}
 				pts := packet.PTS - packets[0].PTS + cycle*4*videoClockRate
+				pts = timing(pts)
 				au, _, err := adapter.prepare(packet.au, false)
 				if err != nil {
 					t.Error(err)

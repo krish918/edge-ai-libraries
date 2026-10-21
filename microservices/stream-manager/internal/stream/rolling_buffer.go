@@ -398,6 +398,10 @@ func (l *BufferLease) StartTime() time.Time {
 func (l *BufferLease) SetEnd(end time.Time) error {
 	l.buffer.mu.Lock()
 	defer l.buffer.mu.Unlock()
+	return l.setEndLocked(end)
+}
+
+func (l *BufferLease) setEndLocked(end time.Time) error {
 	if l.closed {
 		return ErrLeaseClosed
 	}
