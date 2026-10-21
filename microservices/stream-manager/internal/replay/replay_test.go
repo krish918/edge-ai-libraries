@@ -45,7 +45,12 @@ var (
 // passes it through the recorder's FFmpeg flags, as a recording's media.ts.
 func fixture(t *testing.T, bFrames int) string {
 	t.Helper()
-	if path, ok := fixtures.Load(bFrames); ok {
+	return cachedFixture(t, bFrames, fixtureFPS, fixtureFrames, fixtureGOP, bFrames)
+}
+
+func cachedFixture(t *testing.T, key any, fps, frames, gop, bFrames int) string {
+	t.Helper()
+	if path, ok := fixtures.Load(key); ok {
 		return path.(string)
 	}
 	for _, tool := range []string{"ffmpeg", "ffprobe"} {
@@ -59,12 +64,12 @@ func fixture(t *testing.T, bFrames int) string {
 	}
 	source, media := filepath.Join(dir, "source.ts"), filepath.Join(dir, "media.ts")
 	run(t, "ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
-		fmt.Sprintf("testsrc2=size=160x120:rate=%d", fixtureFPS), "-frames:v", strconv.Itoa(fixtureFrames),
-		"-c:v", "libx264", "-pix_fmt", "yuv420p", "-g", strconv.Itoa(fixtureGOP), "-keyint_min", strconv.Itoa(fixtureGOP),
+		fmt.Sprintf("testsrc2=size=160x120:rate=%d", fps), "-frames:v", strconv.Itoa(frames),
+		"-c:v", "libx264", "-pix_fmt", "yuv420p", "-g", strconv.Itoa(gop), "-keyint_min", strconv.Itoa(gop),
 		"-sc_threshold", "0", "-bf", strconv.Itoa(bFrames), "-output_ts_offset", "1001.4", "-f", "mpegts", source)
 	run(t, "ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "mpegts", "-i", source, "-map", "0:v:0", "-an",
 		"-c:v", "copy", "-copyts", "-start_at_zero", "-mpegts_copyts", "1", "-f", "mpegts", media)
-	fixtures.Store(bFrames, media)
+	fixtures.Store(key, media)
 	return media
 }
 
@@ -98,7 +103,11 @@ type testEnv struct {
 
 func newEnv(t *testing.T, bFrames int) testEnv {
 	t.Helper()
-	media := fixture(t, bFrames)
+	return newEnvWithMedia(t, fixture(t, bFrames))
+}
+
+func newEnvWithMedia(t *testing.T, media string) testEnv {
+	t.Helper()
 	dir := filepath.Join(t.TempDir(), "storage")
 	if err := os.Mkdir(dir, 0o700); err != nil {
 		t.Fatal(err)
