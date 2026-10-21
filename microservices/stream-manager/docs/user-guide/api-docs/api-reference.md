@@ -711,7 +711,7 @@ No matches returns `200` with an empty `items` list, never `404`.
 | Status | `error_code` | Meaning |
 |---|---|---|
 | 200 | — | Page of `Recording` objects. |
-| 400 | `invalid_request` / `invalid_timestamp` | Invalid ID, state, metadata filter, cursor, or limit (`invalid_request`); invalid timestamp filter (`invalid_timestamp`). |
+| 400 | `invalid_request` / `invalid_timestamp` | Invalid ID, state, metadata filter, cursor, or limit (`invalid_request`); invalid timestamp filter (`invalid_timestamp`). Stream Manager reports all invalid ID, state, `limit`, and timestamp parameters together in `error_detail`, one per line. The code is `invalid_timestamp` only when all of them are timestamp errors. |
 
 ### Get a record
 

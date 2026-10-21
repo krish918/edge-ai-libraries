@@ -424,7 +424,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/RecordingPage'
         '400':
-          description: Invalid ID, state, metadata filter, cursor, or limit (invalid_request), or invalid timestamp filter (invalid_timestamp).
+          description: Invalid ID, state, metadata filter, cursor, or limit (invalid_request), or invalid timestamp filter (invalid_timestamp). Invalid ID, state, limit, and timestamp parameters are reported together in error_detail, one per line; error_code is invalid_timestamp only when all of them are timestamp errors.
           content:
             application/json:
               schema:
