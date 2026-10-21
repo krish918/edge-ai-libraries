@@ -24,6 +24,7 @@ This page lists each setting, its purpose, and its default value.
 | `ConcurrentRecorders` | integer | count | `10` | Maximum number of recordings that can run at the same time. |
 | `RecordingStorageSize` | integer | megabytes | `10240` | Storage quota for recorded media and the frames and clips cut from it. Must be between 5120 and 1073741824. |
 | `RecordingRetention` | integer | hours | `0` | Time to keep a finished or failed recording. Stream Manager then deletes the recording and its media. `0` keeps recordings until you delete them. Must be between 0 and 87600. |
+| `DerivedMediaTTL` | integer | minutes | `15` | Time to keep a frame or clip after Stream Manager cuts it. Must be between 1 and 1440. |
 
 ### Storage quota
 
@@ -58,6 +59,17 @@ Stream Manager continues to delete the recordings that already have an `expiry_t
 > Stream Manager deletes expired recordings permanently. Set `RecordingRetention` only
 > when you do not need the recordings after this time.
 
+### Frame and clip lifetime
+
+Stream Manager keeps each frame and clip that it cuts for `DerivedMediaTTL` minutes.
+A request for the same frame or clip in this time gets the saved file.
+After this time, the `url` in the `MediaResult` returns `404`, and a new request cuts
+the frame or clip again.
+
+> [!NOTE]
+> A frame or clip never stays longer than its recording. When the recording has an
+> earlier `expiry_ts`, the frame or clip uses that time.
+
 ## Example
 
 ```json
@@ -67,7 +79,8 @@ Stream Manager continues to delete the recordings that already have an `expiry_t
   "StorageDir": "~/.local/share/stream-manager",
   "ConcurrentRecorders": 10,
   "RecordingStorageSize": 10240,
-  "RecordingRetention": 0
+  "RecordingRetention": 0,
+  "DerivedMediaTTL": 15
 }
 ```
 

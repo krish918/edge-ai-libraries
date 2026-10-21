@@ -70,7 +70,7 @@ func TestStreamRoutes(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	replays, err := replay.NewService(metadata, media)
+	replays, err := replay.NewService(metadata, media, 15*time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}

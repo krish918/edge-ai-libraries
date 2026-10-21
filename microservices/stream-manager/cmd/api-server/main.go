@@ -69,7 +69,7 @@ func run() (errResult error) {
 		return err
 	}
 	defer func() { errResult = errors.Join(errResult, recordings.Close()) }()
-	replays, err := replay.NewService(metadata, media)
+	replays, err := replay.NewService(metadata, media, cfg.DerivedMediaTTLPeriod())
 	if err != nil {
 		return err
 	}

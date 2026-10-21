@@ -980,7 +980,9 @@ Status codes and `error_code`s are identical to [Extract a clip](#extract-a-clip
 `GET /media/{recording-id}/{file}`
 
 Serves the bytes of a frame or clip named by a `MediaResult`'s `url`. The file is kept
-only until its `expiry_ts`, which is capped by the recording's own `expiry_ts`.
+only until its `expiry_ts`. This is `DerivedMediaTTL` minutes (default 15) after the file
+is cut, capped by the recording's own `expiry_ts`. See
+[Configuration](../configuration.md#frame-and-clip-lifetime).
 
 | Parameter | In | Type | Required | Description |
 |---|---|---|---|---|

@@ -20,9 +20,6 @@ import (
 
 const (
 	maxConcurrentExtractions = 6
-	// derivedTTL is how long a cut frame or clip is kept stored (response caching);
-	// the recording's own expiry_ts wins when it comes sooner.
-	derivedTTL = 15 * time.Minute
 	// exactTolerance is how far a frame may sit from the requested time and
 	// still count as an exact match.
 	exactTolerance = time.Millisecond
@@ -70,11 +67,17 @@ type Service struct {
 	ffprobe  string
 	slots    chan struct{}
 	now      func() time.Time
+	// derivedTTL is how long a cut frame or clip is kept stored (response caching);
+	// the recording's own expiry_ts wins when it comes sooner.
+	derivedTTL time.Duration
 }
 
 var _ Replayer = (*Service)(nil)
 
-func NewService(metadata storage.MetadataHandler, media storage.MediaHandler) (*Service, error) {
+func NewService(metadata storage.MetadataHandler, media storage.MediaHandler, derivedTTL time.Duration) (*Service, error) {
+	if derivedTTL <= 0 {
+		return nil, fmt.Errorf("%w: derived media TTL must be positive", ErrInvalidRequest)
+	}
 	ffmpeg, err := exec.LookPath("ffmpeg")
 	if err != nil {
 		return nil, fmt.Errorf("find FFmpeg: %w", err)
@@ -85,7 +88,7 @@ func NewService(metadata storage.MetadataHandler, media storage.MediaHandler) (*
 	}
 	return &Service{
 		metadata: metadata, media: media, ffmpeg: ffmpeg, ffprobe: ffprobe,
-		slots: make(chan struct{}, maxConcurrentExtractions), now: time.Now,
+		slots: make(chan struct{}, maxConcurrentExtractions), now: time.Now, derivedTTL: derivedTTL,
 	}, nil
 }
 
@@ -139,7 +142,7 @@ func (s *Service) Frame(ctx context.Context, id string, ts time.Time, format, ma
 	return Media{
 		Result: model.MediaResult{
 			RecordingID: rec.RecordingID, SensorID: rec.SensorID, MediaType: "frame", ContentType: contentType,
-			RequestedStartTS: ts.UTC(), StartTS: frameTS.UTC(), ExpiryTS: expiry(rec, mtime),
+			RequestedStartTS: ts.UTC(), StartTS: frameTS.UTC(), ExpiryTS: s.expiry(rec, mtime),
 		},
 		Name: name, Path: path, ExactMatch: exact,
 	}, nil
@@ -187,7 +190,7 @@ func (s *Service) Clip(ctx context.Context, id string, start time.Time, duration
 		Result: model.MediaResult{
 			RecordingID: rec.RecordingID, SensorID: rec.SensorID, MediaType: "clip", ContentType: contentTypes[format],
 			RequestedStartTS: start.UTC(), RequestedEndTS: &requestedEnd,
-			StartTS: clipStart.UTC(), EndTS: &clipEnd, ExpiryTS: expiry(rec, mtime),
+			StartTS: clipStart.UTC(), EndTS: &clipEnd, ExpiryTS: s.expiry(rec, mtime),
 		},
 		Name: name, Path: path, ExactMatch: clipStart.Equal(start),
 	}, nil
@@ -210,7 +213,7 @@ func (s *Service) OpenMedia(ctx context.Context, id, name string) (*os.File, Med
 	if err != nil {
 		return nil, MediaFile{}, errors.Join(err, file.Close())
 	}
-	expiryTS := expiry(rec, info.ModTime())
+	expiryTS := s.expiry(rec, info.ModTime())
 	if !s.now().Before(expiryTS) {
 		return nil, MediaFile{}, errors.Join(ErrMediaNotFound, file.Close())
 	}
@@ -307,7 +310,7 @@ func (s *Service) cachedDerived(ctx context.Context, rec model.Recording, name s
 	if err := errors.Join(err, file.Close()); err != nil {
 		return "", time.Time{}, err
 	}
-	if !s.now().Before(info.ModTime().Add(derivedTTL)) {
+	if !s.now().Before(info.ModTime().Add(s.derivedTTL)) {
 		return "", time.Time{}, nil
 	}
 	return file.Name(), info.ModTime(), nil
@@ -319,8 +322,8 @@ func ffmpegArgs(args []string) []string {
 }
 
 // expiry is the TTL of a derived file, capped by its recording's expiry_ts.
-func expiry(rec model.Recording, mtime time.Time) time.Time {
-	expiryTS := mtime.Add(derivedTTL)
+func (s *Service) expiry(rec model.Recording, mtime time.Time) time.Time {
+	expiryTS := mtime.Add(s.derivedTTL)
 	if rec.ExpiryTS != nil && rec.ExpiryTS.Before(expiryTS) {
 		expiryTS = *rec.ExpiryTS
 	}

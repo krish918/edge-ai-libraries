@@ -31,6 +31,8 @@ const (
 	fixtureFPS    = 30
 	fixtureFrames = 180
 	fixtureGOP    = 45
+	// testDerivedTTL differs from the 15-minute default to show the setting is used.
+	testDerivedTTL = 7 * time.Minute
 )
 
 var (
@@ -111,7 +113,7 @@ func newEnv(t *testing.T, bFrames int) testEnv {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = mediaStore.Close() })
-	svc, err := NewService(metadataStore, mediaStore)
+	svc, err := NewService(metadataStore, mediaStore, testDerivedTTL)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -348,6 +350,14 @@ func modTime(t *testing.T, path string) time.Time {
 	return info.ModTime()
 }
 
+func TestNewServiceRejectsNonPositiveTTL(t *testing.T) {
+	for _, ttl := range []time.Duration{0, -time.Minute} {
+		if _, err := NewService(nil, nil, ttl); !errors.Is(err, ErrInvalidRequest) {
+			t.Fatalf("TTL %v: got %v, want ErrInvalidRequest", ttl, err)
+		}
+	}
+}
+
 func TestDerivedTTL(t *testing.T) {
 	env := newEnv(t, 0)
 	rec := env.addRecording(t)
@@ -358,8 +368,8 @@ func TestDerivedTTL(t *testing.T) {
 		t.Fatal(err)
 	}
 	created := modTime(t, first.Path)
-	if !first.Result.ExpiryTS.Equal(created.Add(derivedTTL)) {
-		t.Fatalf("expiry %v, want mtime+%v = %v", first.Result.ExpiryTS, derivedTTL, created.Add(derivedTTL))
+	if !first.Result.ExpiryTS.Equal(created.Add(testDerivedTTL)) {
+		t.Fatalf("expiry %v, want mtime+%v = %v", first.Result.ExpiryTS, testDerivedTTL, created.Add(testDerivedTTL))
 	}
 
 	// A fresh file is reused as is.
@@ -371,7 +381,7 @@ func TestDerivedTTL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if again.Path != first.Path || !modTime(t, again.Path).Equal(old) || !again.Result.ExpiryTS.Equal(old.Add(derivedTTL).UTC()) {
+	if again.Path != first.Path || !modTime(t, again.Path).Equal(old) || !again.Result.ExpiryTS.Equal(old.Add(testDerivedTTL).UTC()) {
 		t.Fatal("cached frame was not reused with its original TTL")
 	}
 
@@ -385,7 +395,7 @@ func TestDerivedTTL(t *testing.T) {
 	}
 
 	// An expired file is refused, then cut again with a new TTL.
-	stale := time.Now().Add(-derivedTTL - time.Second)
+	stale := time.Now().Add(-testDerivedTTL - time.Second)
 	if err := os.Chtimes(first.Path, stale, stale); err != nil {
 		t.Fatal(err)
 	}
@@ -396,7 +406,7 @@ func TestDerivedTTL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !modTime(t, renewed.Path).After(stale.Add(derivedTTL)) {
+	if !modTime(t, renewed.Path).After(stale.Add(testDerivedTTL)) {
 		t.Fatal("expired frame was not cut again")
 	}
 
