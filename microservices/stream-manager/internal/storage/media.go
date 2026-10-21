@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"io/fs"
+	"log/slog"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -91,6 +92,7 @@ func (s *MediaStore) loadUsage() error {
 		if !entry.IsDir() || !validRecordingID(entry.Name()) {
 			continue
 		}
+		s.removeTempDerived(entry.Name())
 		size, err := s.dirSize(entry.Name())
 		if err != nil {
 			return err
@@ -99,6 +101,21 @@ func (s *MediaStore) loadUsage() error {
 		s.used += size
 	}
 	return nil
+}
+
+// removeTempDerived deletes the temporary files that an interrupted frame or
+// clip extraction left in a recording's derived directory.
+func (s *MediaStore) removeTempDerived(dir string) {
+	leftovers, err := fs.Glob(s.root.FS(), filepath.Join(dir, derivedDir, tempDerivedPrefix+"*"))
+	if err != nil {
+		slog.Warn("could not list leftover derived media", "directory", dir, "error", err)
+		return
+	}
+	for _, leftover := range leftovers {
+		if err := s.root.Remove(leftover); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			slog.Warn("could not delete leftover derived media", "file", leftover, "error", err)
+		}
+	}
 }
 
 func (s *MediaStore) dirSize(dir string) (int64, error) {

@@ -103,6 +103,43 @@ func TestMediaQuota(t *testing.T) {
 	}
 }
 
+func TestReopenRemovesLeftoverDerivedTemp(t *testing.T) {
+	ctx := context.Background()
+	dir := filepath.Join(t.TempDir(), "storage")
+	media, err := OpenMediaStore(dir, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	filename, uri := prepareTestMedia(t, media)
+	if _, _, err := media.PutDerived(ctx, uri, "frame-1.png", writeDerived("123")); err != nil {
+		t.Fatal(err)
+	}
+	leftover := filepath.Join(filepath.Dir(filename), derivedDir, tempDerivedPrefix+"crashed.png")
+	if err := os.WriteFile(leftover, []byte("12345"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := media.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	media, err = OpenMediaStore(dir, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = media.Close() })
+	if _, err := os.Stat(leftover); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("leftover temporary file kept: %v", err)
+	}
+	if got := media.UsedBytes(); got != 3 {
+		t.Fatalf("used after reopen = %d, want only the derived frame 3", got)
+	}
+	file, err := media.OpenDerived(ctx, uri, "frame-1.png")
+	if err != nil {
+		t.Fatalf("saved derived frame removed: %v", err)
+	}
+	_ = file.Close()
+}
+
 func TestMediaWithoutQuota(t *testing.T) {
 	media, err := OpenMediaStore(filepath.Join(t.TempDir(), "storage"), 0)
 	if err != nil {
