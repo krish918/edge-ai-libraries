@@ -472,6 +472,8 @@ Saves the video around an event from one attached stream. If the stream lacks th
 requested history, no record is created. Video is copied as whole keyframe-aligned
 MPEG-TS slices without re-encoding; the stored window can extend to the enclosing
 keyframes, and `ready` records report those actual bounds.
+Stream Manager preserves the input time base when it copies video with FFmpeg.
+This prevents timestamp rounding during the copy.
 
 **Request body — `RecordStart`**
 

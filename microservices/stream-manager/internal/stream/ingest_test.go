@@ -398,6 +398,62 @@ func TestRTSPIngest(t *testing.T) {
 	}
 }
 
+func TestRTSPPreservesSourceTimestamps(t *testing.T) {
+	if testing.Short() {
+		t.Skip("real RTSP/FFmpeg integration")
+	}
+	for _, codec := range []string{"h264", "h265"} {
+		t.Run(codec, func(t *testing.T) {
+			source, _, _ := testPublisherWithTiming(t, codec, true, time.Now().UTC(), func(pts int64) int64 {
+				return pts - 2*(pts/videoClockRate)
+			})
+			service := testService(t, 10)
+			id, err := service.CreateBuffer(context.Background(), source, "camera", 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			deadline := time.Now().Add(20 * time.Second)
+			for {
+				snapshot, err := service.GetStream(context.Background(), id)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if snapshot.State == "failed" || time.Now().After(deadline) {
+					t.Fatalf("source timestamps were not preserved: %+v", snapshot)
+				}
+				if len(snapshot.Slices) >= 3 {
+					for i, slice := range snapshot.Slices {
+						if i == 0 {
+							continue
+						}
+						output, err := exec.Command("ffprobe", "-v", "error", "-select_streams", "v:0",
+							"-show_packets", "-show_entries", "packet=pts", "-of", "json", slice.Path).Output()
+						if err != nil {
+							t.Fatal(err)
+						}
+						var probe struct {
+							Packets []struct {
+								PTS int `json:"pts"`
+							} `json:"packets"`
+						}
+						if err := json.Unmarshal(output, &probe); err != nil {
+							t.Fatal(err)
+						}
+						if len(probe.Packets) == 0 {
+							t.Fatal("saved slice has no packets")
+						}
+						if got := probe.Packets[0].PTS; got != slice.PTSStart {
+							t.Fatalf("saved keyframe PTS %d differs from source PTS %d", got, slice.PTSStart)
+						}
+					}
+					break
+				}
+				time.Sleep(50 * time.Millisecond)
+			}
+		})
+	}
+}
+
 func TestRTSPMissingNTP(t *testing.T) {
 	if testing.Short() {
 		t.Skip("real RTSP/FFmpeg integration")
