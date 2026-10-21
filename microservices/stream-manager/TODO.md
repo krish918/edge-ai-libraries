@@ -66,7 +66,7 @@ Items are listed roughly in order of priority.
 - [x] Fix incorrect examples for /clip and /frame endpoints in OpenAPI specs.
 - [x] `DELETE /records/{recording-id}` deleted the database row before the media, returned 200 even when media deletion failed, and left orphan files. Media is now deleted first, a failure returns 503 `storage_unavailable` (or 409 `active_dependency` when media is in use), and the request is safe to retry.
 - [x] Frame and clip extraction near the end of a long recording read the whole recording first. FFprobe now reads only time windows around the requested time, and FFmpeg seeks to the keyframe before it.
-- [ ] Frame and clip extraction falls back to reading from the recording start when no frame is found within ±10 s or no keyframe within 1 min (long gaps or sparse keyframes). Decide whether to cap this or fail fast.
+- [x] Frame and clip extraction falls back to reading from the recording start when no frame is found within ±10 s or no keyframe within 1 min (long gaps or sparse keyframes). Decide whether to cap this or fail fast. — Capped: the search stops at 5 minutes (`replay.SearchLimit`) and returns 404 `frame_not_found` / `clip_not_found`.
 - [ ] MPEG-TS (and also other alternative fMP4) are unseekable. Cut clips are seekable (MP4). Analyze whether this is a prospective issue.
 - [ ] Debug - (intermittent) not disk space left issue in docker container while buffering.
 
