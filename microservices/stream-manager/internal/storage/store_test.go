@@ -9,7 +9,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -88,18 +87,11 @@ func TestSchemaSerializationAndReopen(t *testing.T) {
 	for _, index := range indexes {
 		found[index.Name] = true
 	}
-	for _, name := range []string{"idx_recordings_sensor_stream", "idx_recordings_expiry"} {
-		if !found[name] {
-			t.Fatalf("index %s is missing", name)
-		}
+	if !found["idx_recordings_sensor_stream"] {
+		t.Fatal("sensor/stream index is missing")
 	}
-	var plan []struct{ Detail string }
-	if err := metadata.db.Raw("EXPLAIN QUERY PLAN SELECT * FROM recordings WHERE expiry_ts <= ? "+
-		"ORDER BY creation_ts DESC, recording_id ASC LIMIT 101", time.Now().UnixNano()).Scan(&plan).Error; err != nil {
-		t.Fatal(err)
-	}
-	if len(plan) == 0 || !strings.Contains(plan[0].Detail, "idx_recordings_expiry") {
-		t.Fatalf("expiry query does not use idx_recordings_expiry: %+v", plan)
+	if found["idx_recordings_expiry"] {
+		t.Fatal("expiry index still exists")
 	}
 	if _, err := OpenMetadataStore(dir); err == nil {
 		t.Fatal("second instance acquired the same metadata storage")
@@ -119,6 +111,29 @@ func TestSchemaSerializationAndReopen(t *testing.T) {
 	got, err = reopened.GetMetadataByRecordingID(ctx, rec.RecordingID)
 	if err != nil || !got.StartTS.Equal(rec.StartTS) {
 		t.Fatalf("migration was not idempotent: %+v %v", got, err)
+	}
+}
+
+func TestListMedia(t *testing.T) {
+	_, media, dir := testStores(t)
+	rec := testRecording(t, media)
+	if err := os.Mkdir(filepath.Join(dir, "unrelated"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(t.TempDir(), filepath.Join(dir, uuid.NewString())); err != nil {
+		t.Fatal(err)
+	}
+	listed, err := media.ListMedia(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 1 || listed[rec.RecordingID] != rec.RecordingPath {
+		t.Fatalf("listed media = %v, want only %s", listed, rec.RecordingID)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := media.ListMedia(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled listing: %v", err)
 	}
 }
 

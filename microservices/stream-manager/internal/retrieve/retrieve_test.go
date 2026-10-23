@@ -33,7 +33,7 @@ const (
 	fixtureGOP    = 45
 	// sparseFixtureFrames is 6.5 minutes at 1 fps.
 	sparseFixtureFrames = 390
-	// testDerivedTTL differs from the 15-minute default to show the setting is used.
+	// testDerivedTTL differs from the disabled default to show the setting is used.
 	testDerivedTTL = 7 * time.Minute
 )
 
@@ -399,11 +399,64 @@ func modTime(t *testing.T, path string) time.Time {
 	return info.ModTime()
 }
 
-func TestNewServiceRejectsNonPositiveTTL(t *testing.T) {
-	for _, ttl := range []time.Duration{0, -time.Minute} {
+func TestNewServiceRejectsNegativeTTL(t *testing.T) {
+	for _, ttl := range []time.Duration{-time.Minute} {
 		if _, err := NewService(nil, nil, ttl); !errors.Is(err, ErrInvalidRequest) {
 			t.Fatalf("TTL %v: got %v, want ErrInvalidRequest", ttl, err)
 		}
+	}
+}
+
+func TestDerivedTTLDisabled(t *testing.T) {
+	env := newEnv(t, 0)
+	svc, err := NewService(env.metadataStore, env.mediaStore, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env.svc = svc
+	rec := env.addRecording(t, func(r *model.Recording) { r.ExpiryTS = nil })
+	ctx := context.Background()
+
+	first, err := env.svc.Frame(ctx, rec.RecordingID, frameTS(30), "jpeg", "nearest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Result.ExpiryTS != nil {
+		t.Fatalf("expiry %v, want no expiry", first.Result.ExpiryTS)
+	}
+
+	old := time.Now().Add(-24 * time.Hour)
+	if err := os.Chtimes(first.Path, old, old); err != nil {
+		t.Fatal(err)
+	}
+	again, err := env.svc.Frame(ctx, rec.RecordingID, frameTS(30), "jpeg", "nearest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.Path != first.Path || !modTime(t, again.Path).Equal(old) || again.Result.ExpiryTS != nil {
+		t.Fatal("derived media was not reused without a TTL")
+	}
+	file, info, err := env.svc.OpenMedia(ctx, rec.RecordingID, first.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = file.Close()
+	if info.ExpiryTS != nil {
+		t.Fatalf("media expiry %v, want no expiry", info.ExpiryTS)
+	}
+
+	recordExpiry := time.Now().Add(time.Hour).UTC()
+	expiringRecording := env.addRecording(t, func(r *model.Recording) { r.ExpiryTS = &recordExpiry })
+	expiringMedia, err := env.svc.Frame(ctx, expiringRecording.RecordingID, frameTS(30), "jpeg", "nearest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if expiringMedia.Result.ExpiryTS == nil || !expiringMedia.Result.ExpiryTS.Equal(recordExpiry) {
+		t.Fatalf("expiry %v, want the recording's %v", expiringMedia.Result.ExpiryTS, recordExpiry)
+	}
+	env.svc.now = func() time.Time { return recordExpiry }
+	if _, _, err := env.svc.OpenMedia(ctx, expiringRecording.RecordingID, expiringMedia.Name); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expired recording media: got %v, want ErrNotFound", err)
 	}
 }
 
@@ -417,7 +470,7 @@ func TestDerivedTTL(t *testing.T) {
 		t.Fatal(err)
 	}
 	created := modTime(t, first.Path)
-	if !first.Result.ExpiryTS.Equal(created.Add(testDerivedTTL)) {
+	if first.Result.ExpiryTS == nil || !first.Result.ExpiryTS.Equal(created.Add(testDerivedTTL)) {
 		t.Fatalf("expiry %v, want mtime+%v = %v", first.Result.ExpiryTS, testDerivedTTL, created.Add(testDerivedTTL))
 	}
 
@@ -430,7 +483,8 @@ func TestDerivedTTL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if again.Path != first.Path || !modTime(t, again.Path).Equal(old) || !again.Result.ExpiryTS.Equal(old.Add(testDerivedTTL).UTC()) {
+	if again.Path != first.Path || !modTime(t, again.Path).Equal(old) || again.Result.ExpiryTS == nil ||
+		!again.Result.ExpiryTS.Equal(old.Add(testDerivedTTL).UTC()) {
 		t.Fatal("cached frame was not reused with its original TTL")
 	}
 
@@ -439,7 +493,7 @@ func TestDerivedTTL(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = file.Close()
-	if info.ContentType != "image/jpeg" || !info.ExpiryTS.Equal(again.Result.ExpiryTS) {
+	if info.ContentType != "image/jpeg" || info.ExpiryTS == nil || !info.ExpiryTS.Equal(*again.Result.ExpiryTS) {
 		t.Fatalf("unexpected media info %+v", info)
 	}
 
@@ -477,14 +531,15 @@ func TestDerivedTTLCappedByRecordingExpiry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !media.Result.ExpiryTS.Equal(soon) {
+	if media.Result.ExpiryTS == nil || !media.Result.ExpiryTS.Equal(soon) {
 		t.Fatalf("expiry %v, want the recording's %v", media.Result.ExpiryTS, soon)
 	}
 	file, info, err := env.svc.OpenMedia(ctx, rec.RecordingID, media.Name)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if body, _ := io.ReadAll(file); len(body) == 0 || info.ContentType != "video/mp4" || !info.ExpiryTS.Equal(soon) {
+	if body, _ := io.ReadAll(file); len(body) == 0 || info.ContentType != "video/mp4" ||
+		info.ExpiryTS == nil || !info.ExpiryTS.Equal(soon) {
 		t.Fatalf("unexpected media %+v (%d bytes)", info, len(body))
 	}
 	_ = file.Close()

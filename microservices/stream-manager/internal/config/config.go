@@ -26,7 +26,7 @@ const (
 	MaxStorageSize      = 1 << 30 // MegaBytes; 1 PiB, keeps the byte count far below int64 overflow
 	ConcurrentRecorders = 10
 	MaxRetentionHours   = 10 * 365 * 24
-	DefaultDerivedTTL   = 15      // Minutes
+	DefaultDerivedTTL   = -1      // Disabled
 	MaxDerivedTTL       = 24 * 60 // Minutes; 1 day
 )
 
@@ -38,7 +38,7 @@ type Config struct {
 	ConcurrentRecorders  int
 	RecordingStorageSize int
 	RecordingRetention   int // Hours a finished recording is kept; 0 keeps it until deleted.
-	DerivedMediaTTL      int // Minutes a cut frame or clip is kept.
+	DerivedMediaTTL      int // Minutes a cut frame or clip is kept; -1 disables the TTL.
 }
 
 // Load reads the configuration from config.json (or the file named by SM_CONFIG_FILE),
@@ -99,8 +99,8 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("recording retention must be between 0 and %d hours", MaxRetentionHours)
 	}
 
-	if cfg.DerivedMediaTTL < 1 || cfg.DerivedMediaTTL > MaxDerivedTTL {
-		return Config{}, fmt.Errorf("derived media TTL must be between 1 and %d minutes", MaxDerivedTTL)
+	if cfg.DerivedMediaTTL < -1 || cfg.DerivedMediaTTL == 0 || cfg.DerivedMediaTTL > MaxDerivedTTL {
+		return Config{}, fmt.Errorf("derived media TTL must be -1 or between 1 and %d minutes", MaxDerivedTTL)
 	}
 
 	if storageDir, err := expandHome(cfg.StorageDir); err == nil {
@@ -125,8 +125,11 @@ func (c Config) RecordingRetentionPeriod() time.Duration {
 	return time.Duration(c.RecordingRetention) * time.Hour
 }
 
-// DerivedMediaTTLPeriod returns how long a cut frame or clip is kept.
+// DerivedMediaTTLPeriod returns how long a cut frame or clip is kept; zero disables the TTL.
 func (c Config) DerivedMediaTTLPeriod() time.Duration {
+	if c.DerivedMediaTTL == -1 {
+		return 0
+	}
 	return time.Duration(c.DerivedMediaTTL) * time.Minute
 }
 

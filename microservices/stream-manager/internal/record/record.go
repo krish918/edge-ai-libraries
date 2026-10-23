@@ -39,7 +39,7 @@ var (
 
 const (
 	recoveryBatchSize = 100
-	expiryInterval    = time.Minute
+	expiryInterval    = 24 * time.Hour
 )
 
 // StartOptions describes one recording of a single attached stream.
@@ -131,12 +131,46 @@ func (s *Service) expireLoop() {
 	defer ticker.Stop()
 	for {
 		s.expireRecordings(context.Background())
+		s.cleanupOrphanedMedia(context.Background())
 		select {
 		case <-s.done:
 			return
 		case <-ticker.C:
 		}
 	}
+}
+
+func (s *Service) cleanupOrphanedMedia(ctx context.Context) {
+	media, err := s.media.ListMedia(ctx)
+	if err != nil {
+		slog.Error("list recording media for cleanup", "error", err)
+		return
+	}
+	for id, uri := range media {
+		if err := s.cleanupOrphan(ctx, id, uri); err != nil {
+			slog.Error("clean orphaned recording media", "recording_id", id, "error", err)
+		}
+	}
+}
+
+func (s *Service) cleanupOrphan(ctx context.Context, id, uri string) error {
+	// Start holds this lock while creating both the directory and its metadata.
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed || s.jobs[id] != nil {
+		return nil
+	}
+	_, err := s.metadata.GetMetadataByRecordingID(ctx, id)
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, storage.ErrNotFound) {
+		return err
+	}
+	if err := s.media.DeleteMedia(ctx, uri); err != nil && !errors.Is(err, storage.ErrMediaBusy) {
+		return err
+	}
+	return nil
 }
 
 // expireRecordings deletes the media and then the metadata of expired
@@ -381,14 +415,11 @@ func (s *Service) DeleteRecording(ctx context.Context, id string) error {
 	if rec.State == "recording" || rec.State == "finalizing" || s.jobs[id] != nil {
 		return ErrConflict
 	}
-	if err := s.media.DeleteMedia(ctx, rec.RecordingPath); err != nil {
-		if errors.Is(err, storage.ErrMediaBusy) {
-			return err
-		}
+	if err := s.metadata.DeleteMetadata(ctx, id); err != nil {
 		return fmt.Errorf("%w: %w", ErrCleanup, err)
 	}
-	if err := s.metadata.DeleteMetadata(ctx, id); err != nil && !errors.Is(err, storage.ErrNotFound) {
-		return fmt.Errorf("%w: %w", ErrCleanup, err)
+	if err := s.media.DeleteMedia(ctx, rec.RecordingPath); err != nil {
+		slog.Error("recording media left after delete", "recording_id", id, "error", err)
 	}
 	return nil
 }

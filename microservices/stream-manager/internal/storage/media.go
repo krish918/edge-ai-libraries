@@ -24,6 +24,7 @@ import (
 // MediaHandler reserves, saves, opens and deletes recorded media and the
 // frames and clips derived from it.
 type MediaHandler interface {
+	ListMedia(ctx context.Context) (map[string]string, error)
 	PrepareMedia(ctx context.Context, recordingID string) (filename, uri string, err error)
 	PutMedia(ctx context.Context, uri string) (string, int64, error)
 	OpenMedia(ctx context.Context, uri string) (string, error)
@@ -209,6 +210,26 @@ func (s *MediaStore) UsedBytes() int64 {
 
 // Derived media names carry offsets in nanoseconds from the recording start.
 var derivedName = regexp.MustCompile(`^(frame-[0-9]+\.(jpeg|png)|clip-[0-9]+-[0-9]+\.mp4)$`)
+
+// ListMedia maps recording IDs to their media URIs, including orphaned directories.
+func (s *MediaStore) ListMedia(ctx context.Context) (map[string]string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	entries, err := fs.ReadDir(s.root.FS(), ".")
+	if err != nil {
+		return nil, err
+	}
+	media := make(map[string]string)
+	for _, entry := range entries {
+		if !entry.IsDir() || !validRecordingID(entry.Name()) {
+			continue
+		}
+		path := filepath.Join(s.root.Name(), entry.Name(), "media.ts")
+		media[entry.Name()] = (&url.URL{Scheme: "file", Path: path}).String()
+	}
+	return media, nil
+}
 
 // PrepareMedia reserves a private UUID directory. FFmpeg creates media.ts there.
 func (s *MediaStore) PrepareMedia(ctx context.Context, id string) (filename, uri string, err error) {

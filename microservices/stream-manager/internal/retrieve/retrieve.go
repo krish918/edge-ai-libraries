@@ -58,7 +58,7 @@ type Media struct {
 // MediaFile describes an opened derived media (frame or clip).
 type MediaFile struct {
 	ContentType string
-	ExpiryTS    time.Time
+	ExpiryTS    *time.Time
 }
 
 // Service implements Retriever with FFmpeg and FFprobe.
@@ -77,8 +77,8 @@ type Service struct {
 var _ Retriever = (*Service)(nil)
 
 func NewService(metadata storage.MetadataHandler, media storage.MediaHandler, derivedTTL time.Duration) (*Service, error) {
-	if derivedTTL <= 0 {
-		return nil, fmt.Errorf("%w: derived media TTL must be positive", ErrInvalidRequest)
+	if derivedTTL < 0 {
+		return nil, fmt.Errorf("%w: derived media TTL cannot be negative", ErrInvalidRequest)
 	}
 	ffmpeg, err := exec.LookPath("ffmpeg")
 	if err != nil {
@@ -216,7 +216,7 @@ func (s *Service) OpenMedia(ctx context.Context, id, name string) (*os.File, Med
 		return nil, MediaFile{}, errors.Join(err, file.Close())
 	}
 	expiryTS := s.expiry(rec, info.ModTime())
-	if !s.now().Before(expiryTS) {
+	if expiryTS != nil && !s.now().Before(*expiryTS) {
 		return nil, MediaFile{}, errors.Join(ErrMediaNotFound, file.Close())
 	}
 	contentType := contentTypes[filepath.Ext(name)[1:]]
@@ -312,7 +312,7 @@ func (s *Service) cachedDerived(ctx context.Context, rec model.Recording, name s
 	if err := errors.Join(err, file.Close()); err != nil {
 		return "", time.Time{}, err
 	}
-	if !s.now().Before(info.ModTime().Add(s.derivedTTL)) {
+	if s.derivedTTL > 0 && !s.now().Before(info.ModTime().Add(s.derivedTTL)) {
 		return "", time.Time{}, nil
 	}
 	return file.Name(), info.ModTime(), nil
@@ -324,12 +324,20 @@ func ffmpegArgs(args []string) []string {
 }
 
 // expiry is the TTL of a derived file, capped by its recording's expiry_ts.
-func (s *Service) expiry(rec model.Recording, mtime time.Time) time.Time {
+func (s *Service) expiry(rec model.Recording, mtime time.Time) *time.Time {
+	if s.derivedTTL == 0 {
+		if rec.ExpiryTS == nil {
+			return nil
+		}
+		expiryTS := rec.ExpiryTS.UTC()
+		return &expiryTS
+	}
 	expiryTS := mtime.Add(s.derivedTTL)
 	if rec.ExpiryTS != nil && rec.ExpiryTS.Before(expiryTS) {
 		expiryTS = *rec.ExpiryTS
 	}
-	return expiryTS.UTC()
+	expiryTS = expiryTS.UTC()
+	return &expiryTS
 }
 
 func absDuration(d time.Duration) time.Duration {

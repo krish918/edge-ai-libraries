@@ -193,7 +193,7 @@ Returned by `DELETE /streams/{stream-id}` and `DELETE /records/{recording-id}`.
 |---|---|---|
 | `resource` | string | `stream` or `recording`. |
 | `id` | string | Which resource was deleted. |
-| `deleted` | boolean | Always `true`, sent only once the deletion has finished. |
+| `deleted` | boolean | Always `true`. For a recording, metadata deletion has finished; media cleanup can finish later. |
 
 ```json
 { "resource": "recording", "id": "rec-2", "deleted": true }
@@ -772,13 +772,13 @@ Content-Type: application/json
 
 `DELETE /records/{recording-id}`
 
-Deletes the record's media, then its metadata. If the media delete fails, the record
-remains. If the metadata delete fails, the media is gone but the record remains. In
-both cases, the request returns `503`. Send the request again to complete the delete.
-Deleting again, or reading it afterwards, returns `404`.
-
-A frame or clip extraction that is in progress uses the recording media. During this
-time, the request returns `409` with `active_dependency`.
+Deletes the record's metadata first, then attempts to delete its media. If metadata
+deletion fails, the request returns `503` and the media stays unchanged.
+If media deletion fails or an extraction still uses the media, the request returns
+`200`. Stream Manager logs the deferred deletion. The cleanup job retries removal of
+media without metadata at startup and every 24 hours. The media continues to count
+toward the storage quota until it is removed.
+Deleting again, or reading the deleted recording, returns `404`.
 
 ```bash
 curl -i -X DELETE http://localhost:8080/v1/records/rec-2
@@ -796,8 +796,7 @@ Content-Type: application/json
 | 200 | — | Record deleted. |
 | 404 | `recording_not_found` | Unknown or already deleted recording. |
 | 409 | `record_not_ready` | Record is still recording or finalizing. |
-| 409 | `active_dependency` | A frame or clip extraction uses the recording media. Retry later. |
-| 503 | `storage_unavailable` | Media or metadata deletion failed. The record remains; retry later. |
+| 503 | `storage_unavailable` | Metadata deletion failed. The record and media remain; retry later. |
 
 ---
 
@@ -817,11 +816,6 @@ The service respects quality values (`q`) and excludes types with `q=0`.
 For equal quality values, the service prefers JSON, then JPEG, then PNG.
 Responses include `Vary: Accept`. Errors use JSON, including errors for binary requests.
 The `/media` endpoint serves the file referenced by a JSON response.
-
-> **NOTE:** To decode a frame, the service must find a keyframe before it. The
-> service searches a maximum of 5 minutes back from the requested time. If the
-> recording has no keyframe in that range, the request fails with `404`. A retry
-> gives the same result. This limit applies to frames and clips.
 
 ### Extract a frame
 
@@ -879,7 +873,7 @@ X-Exact-Match: false
 | 200 | — | `MediaResult`, or the image bytes when an image `Accept` header is used. |
 | 400 | `invalid_timestamp` | Missing or invalid `timestamp`. |
 | 400 | `invalid_request` | Unsupported `format` or `match`. |
-| 404 | `recording_not_found` / `frame_not_found` | Recording not found, timestamp outside coverage, exact frame missing, or no decodable frame within 5 minutes of the timestamp. |
+| 404 | `recording_not_found` / `frame_not_found` | Recording not found, timestamp outside coverage, exact frame missing, or no decodable frame available for the requested time. |
 | 406 | `not_acceptable` | Incompatible `Accept` header. |
 | 409 | `record_not_ready` | Record not ready. |
 | 429 | `capacity_exhausted` | Extraction capacity reached. |
@@ -935,7 +929,7 @@ curl -i "http://localhost:8080/v1/retrieve/rec-2/clip?start_ts=2026-09-16T09:12:
 | 200 | — | `MediaResult`, or video bytes when a video `Accept` header is used. |
 | 400 | `invalid_timestamp` | Missing or invalid `start_ts`. |
 | 400 | `invalid_request` | Missing or invalid `duration`, or unsupported `format`. |
-| 404 | `recording_not_found` / `clip_not_found` | Recording not found, the requested interval is not fully covered, or no keyframe within 5 minutes before `start_ts`. |
+| 404 | `recording_not_found` / `clip_not_found` | Recording not found, the requested interval is not fully covered, or no clip available for the requested interval. |
 | 406 | `not_acceptable` | Incompatible `Accept` header. |
 | 409 | `record_not_ready` | Record not ready. |
 | 429 | `capacity_exhausted` | Extraction capacity reached. |
@@ -946,9 +940,11 @@ curl -i "http://localhost:8080/v1/retrieve/rec-2/clip?start_ts=2026-09-16T09:12:
 
 `GET /media/{recording-id}/{file}`
 
-Serves the bytes of a frame or clip named by a `MediaResult`'s `url`. The file is kept
-only until its `expiry_ts`. This is `DerivedMediaTTL` minutes (default 15) after the file
-is cut, capped by the recording's own `expiry_ts`. See
+Serves the bytes of a frame or clip named by a `MediaResult`'s `url`. When
+`DerivedMediaTTL` is greater than `0`, the file is available for that many minutes
+after it is cut, capped by the recording's own `expiry_ts`. Set `DerivedMediaTTL` to
+`-1` to disable this TTL. In that case, the file stays available until its recording
+expires or is deleted. `expiry_ts` is `null` when neither expiry applies. See
 [Configuration](../configuration.md#frame-and-clip-lifetime).
 
 | Parameter | In | Type | Required | Description |
@@ -984,8 +980,8 @@ X-Content-Type-Options: nosniff
 | `invalid_timestamp` | 400 | A timestamp is malformed or out of range. A `start_ts` in `POST /records/start` that is later than the newest video frame from the source also uses this code. A missing `start_ts` there returns `invalid_request`. |
 | `stream_not_found` | 404 | The stream is unknown or has been detached. |
 | `recording_not_found` | 404 | The recording is unknown or has been deleted. |
-| `frame_not_found` | 404 | The requested frame is not covered, no frame sits at the exact requested time (`match=exact`), no decodable frame is within 5 minutes of the requested time, or a frame file is missing or expired. |
-| `clip_not_found` | 404 | The requested clip interval is not covered, no keyframe is within 5 minutes before the clip start, or a clip file is missing or expired. |
+| `frame_not_found` | 404 | The requested frame is not covered, no frame sits at the exact requested time (`match=exact`), no decodable frame is available for the requested time, or a frame file is missing or expired. |
+| `clip_not_found` | 404 | The requested clip interval is not covered, no clip is available for the requested interval, or a clip file is missing or expired. |
 | `not_acceptable` | 406 | The `Accept` header cannot be satisfied. |
 | `stream_exists` | 409 | The same `source_uri` is already attached for that `sensor_id`; the existing `stream_id` is named in `error_detail`. |
 | `record_not_ready` | 409 | The record is not in a state that allows the requested action. |

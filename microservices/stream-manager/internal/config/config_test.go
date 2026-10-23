@@ -220,6 +220,7 @@ func TestLoadRecordingStorageLimits(t *testing.T) {
 		`{"RecordingRetention": -1}`,
 		`{"RecordingRetention": ` + strconv.Itoa(MaxRetentionHours+1) + `}`,
 		`{"DerivedMediaTTL": 0}`,
+		`{"DerivedMediaTTL": -2}`,
 		`{"DerivedMediaTTL": ` + strconv.Itoa(MaxDerivedTTL+1) + `}`,
 	} {
 		if err := os.WriteFile(filepath.Join(dir, DefaultConfigFile), []byte(body), 0o600); err != nil {
@@ -230,11 +231,22 @@ func TestLoadRecordingStorageLimits(t *testing.T) {
 		}
 	}
 
+	if err := os.WriteFile(filepath.Join(dir, DefaultConfigFile), []byte(`{"DerivedMediaTTL": -1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.DerivedMediaTTL != -1 || cfg.DerivedMediaTTLPeriod() != 0 {
+		t.Fatalf("disabled derived TTL: got %d and %v, want -1 and 0", cfg.DerivedMediaTTL, cfg.DerivedMediaTTLPeriod())
+	}
+
 	const body = `{"RecordingStorageSize": 6000, "RecordingRetention": 48, "DerivedMediaTTL": 60}`
 	if err := os.WriteFile(filepath.Join(dir, DefaultConfigFile), []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := Load()
+	cfg, err = Load()
 	if err != nil {
 		t.Fatal(err)
 	}
