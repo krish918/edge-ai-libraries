@@ -28,6 +28,7 @@ type RollingBuffer struct {
 	changed  chan struct{}
 	lastSeq  int
 	lastEnd  time.Time
+	liveEdge time.Time
 	failure  error
 	closed   bool
 }
@@ -157,7 +158,17 @@ func (b *RollingBuffer) snapshot() model.StreamBuffer {
 		result.BufferStat.OldestTS = b.slices[0].media.StartTS
 		result.BufferStat.NewestTS = b.slices[len(b.slices)-1].media.EndTS
 	}
+	result.BufferStat.LiveEdgeTS = b.liveEdge
 	return result
+}
+
+// advanceLiveEdge records the source time of the newest frame sent to FFmpeg.
+func (b *RollingBuffer) advanceLiveEdge(frameTS time.Time) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if frameTS.After(b.liveEdge) {
+		b.liveEdge = frameTS
+	}
 }
 
 func (b *RollingBuffer) selectLocked(start, end time.Time, follow bool) ([]*bufferSlice, error) {
@@ -398,6 +409,22 @@ func (l *BufferLease) StartTime() time.Time {
 func (l *BufferLease) SetEnd(end time.Time) error {
 	l.buffer.mu.Lock()
 	defer l.buffer.mu.Unlock()
+	return l.setEndLocked(end)
+}
+
+// EndAtLiveEdge ends a following lease at the newest source frame and returns
+// that time, so the end uses the source clock and not the host clock.
+func (l *BufferLease) EndAtLiveEdge() (time.Time, error) {
+	l.buffer.mu.Lock()
+	defer l.buffer.mu.Unlock()
+	end := l.buffer.liveEdge
+	if !end.After(l.start) {
+		return time.Time{}, ErrHistoryUnavailable
+	}
+	return end, l.setEndLocked(end)
+}
+
+func (l *BufferLease) setEndLocked(end time.Time) error {
 	if l.closed {
 		return ErrLeaseClosed
 	}

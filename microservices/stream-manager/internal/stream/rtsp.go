@@ -30,6 +30,9 @@ const (
 	videoClockRate      = 90000
 	maxPendingKeyframes = 256
 	sourceClockJump     = time.Second
+	// relayWriteQueueSize must hold every RTP packet of the largest frame, which
+	// is written as one burst: 4096 packets carry about 5.9 MB at 1450 bytes each.
+	relayWriteQueueSize = 4096
 )
 
 type keyframeTime struct {
@@ -166,7 +169,7 @@ func (s *rtspInput) fail(reason string) {
 	})
 }
 
-func openRTSP(ctx context.Context, sourceURI string, onFrame func(bool)) (_ *rtspInput, result error) {
+func openRTSP(ctx context.Context, sourceURI string, onFrame func(bool), onForwarded func(time.Time)) (_ *rtspInput, result error) {
 	u, err := base.ParseURL(sourceURI)
 	if err != nil || (u.Scheme != "rtsp" && u.Scheme != "rtsps") || u.User != nil || u.Host == "" {
 		return nil, ErrUnsupportedSource
@@ -211,7 +214,10 @@ func openRTSP(ctx context.Context, sourceURI string, onFrame func(bool)) (_ *rts
 	if err != nil {
 		return nil, ErrUnsupportedSource
 	}
-	s.relay, err = newVideoRelay(codec.local, func() { s.fail("FFmpeg relay disconnected") })
+	s.relay, err = newVideoRelay(codec.local, func() { s.fail("FFmpeg relay disconnected") }, func() {
+		onFrame(true)
+		s.fail("FFmpeg relay dropped video packets")
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -316,6 +322,7 @@ func openRTSP(ctx context.Context, sourceURI string, onFrame func(bool)) (_ *rts
 				return
 			}
 		}
+		onForwarded(ntp.UTC())
 	})
 	if _, err := s.client.Play(nil); err != nil {
 		return nil, fmt.Errorf("%w: play RTSP source", ErrSourceFailed)
@@ -361,20 +368,22 @@ type videoRelay struct {
 	playConn        *gortsplib.ServerConn
 	playCSeq        string
 	onClosed        func()
+	onWriteError    func()
 }
 
-func newVideoRelay(codec format.Format, onClosed func()) (*videoRelay, error) {
+func newVideoRelay(codec format.Format, onClosed, onWriteError func()) (*videoRelay, error) {
 	relayUUID, err := uuid.NewRandom()
 	if err != nil {
 		return nil, err
 	}
 	r := &videoRelay{
-		path: "/" + base64.RawURLEncoding.EncodeToString(relayUUID[:]), onClosed: onClosed,
+		path: "/" + base64.RawURLEncoding.EncodeToString(relayUUID[:]), onClosed: onClosed, onWriteError: onWriteError,
 		timestampOrigin: binary.BigEndian.Uint32(relayUUID[:4]) | 1,
 		media:           &description.Media{Type: description.MediaTypeVideo, Formats: []format.Format{codec}},
 	}
 	r.server = &gortsplib.Server{
 		RTSPAddress: "127.0.0.1:0", Handler: r, DisableRTCPSenderReports: true,
+		WriteQueueSize: relayWriteQueueSize,
 	}
 	if err := r.server.Start(); err != nil {
 		return nil, fmt.Errorf("start local RTSP relay: %w", err)
@@ -443,6 +452,11 @@ func (r *videoRelay) OnSessionClose(ctx *gortsplib.ServerHandlerOnSessionCloseCt
 	if matched {
 		r.onClosed()
 	}
+}
+
+// OnStreamWriteError reports packets that could not be queued for FFmpeg.
+func (r *videoRelay) OnStreamWriteError(*gortsplib.ServerHandlerOnStreamWriteErrorCtx) {
+	r.onWriteError()
 }
 
 func (r *videoRelay) close() {

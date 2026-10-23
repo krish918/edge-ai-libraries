@@ -31,7 +31,7 @@ It complements the OpenAPI specification with necessary examples and finer detai
   - [Find records](#find-records)
   - [Get a record](#get-a-record)
   - [Delete a record](#delete-a-record)
-- [Replay APIs](#replay-apis)
+- [Retrieval APIs](#retrieval-apis)
   - [Extract a frame](#extract-a-frame)
   - [Get an HTTP link to a frame](#get-an-http-link-to-a-frame)
   - [Extract a clip](#extract-a-clip)
@@ -50,9 +50,9 @@ http://localhost:8080/v1
 
 ## Conventions
 
-- **Content type**: requests and responses use `application/json`, except `/replays/*`
+- **Content type**: requests and responses use `application/json`, except `/retrieve/*`
   and `/media/*`, which may return raw image/video bytes (see
-  [Replay APIs](#replay-apis)).
+  [Retrieval APIs](#retrieval-apis)).
 - **Timestamps**: RFC 3339, UTC, with a `Z` suffix and up to 9 fractional digits
   (nanosecond precision), for example `2026-09-16T09:12:03.400000000Z`.
 - **Identifiers**: New `stream_id` values start with `str-` and contain 22 URL-safe
@@ -150,8 +150,8 @@ One record is one recording of one sensor.
 | `size_bytes` | integer, nullable | Size of the finished media; `null` until `ready`. |
 | `metadata` | object | Whatever metadata the caller supplied, or `{}` if none was. |
 | `creation_ts` | string (date-time) | Record creation time. |
-| `expiry_ts` | string (date-time), nullable | When the recording is due to be deleted; `null` when the deployment default applies. |
-| `error_detail` | string, nullable | A short reason, present only when `state` is `failed`. |
+| `expiry_ts` | string (date-time), nullable | When Stream Manager deletes the recording automatically. It is set when the recording becomes `ready` or `failed` and the deployment sets `RecordingRetention`. It is `null` when no retention is set; the recording then stays until you delete it. |
+| `error_detail` | string, nullable | A short reason. It is present when `state` is `failed`. It is also present when `state` is `ready` and the storage quota stopped the recording early. |
 
 ```json
 {
@@ -171,15 +171,13 @@ One record is one recording of one sensor.
 
 ### MediaResult
 
-Returned by the [Replay APIs](#replay-apis) when the reply is JSON rather than raw
+Returned by the [Retrieval APIs](#retrieval-apis) when the reply is JSON rather than raw
 media.
 
 | Field | Type | Description |
 |---|---|---|
 | `recording_id` | string | The record the media was taken from. |
 | `sensor_id` | string | The sensor the media belongs to. |
-| `media_type` | string | `frame` or `clip`. |
-| `content_type` | string | File type produced, e.g. `image/jpeg` or `video/mp4`. |
 | `requested_start_ts` | string (date-time) | Time the caller asked for. |
 | `requested_end_ts` | string (date-time), nullable | End the caller asked for (exclusive); `null` for a single frame. |
 | `start_ts` | string (date-time) | Real time of the returned frame, or first frame of the clip. |
@@ -195,7 +193,7 @@ Returned by `DELETE /streams/{stream-id}` and `DELETE /records/{recording-id}`.
 |---|---|---|
 | `resource` | string | `stream` or `recording`. |
 | `id` | string | Which resource was deleted. |
-| `deleted` | boolean | Always `true`, sent only once the deletion has finished. |
+| `deleted` | boolean | Always `true`. For a recording, metadata deletion has finished; media cleanup can finish later. |
 
 ```json
 { "resource": "recording", "id": "rec-2", "deleted": true }
@@ -472,13 +470,15 @@ Saves the video around an event from one attached stream. If the stream lacks th
 requested history, no record is created. Video is copied as whole keyframe-aligned
 MPEG-TS slices without re-encoding; the stored window can extend to the enclosing
 keyframes, and `ready` records report those actual bounds.
+Stream Manager preserves the input time base when it copies video with FFmpeg.
+This prevents timestamp rounding during the copy.
 
 **Request body — `RecordStart`**
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `stream_id` | string | yes | The attached stream to record. |
-| `start_ts` | string (date-time) | yes | The moment the event happened (T). Cannot be in the future. |
+| `start_ts` | string (date-time) | yes | The moment the event happened (T), on the source clock. Cannot be later than the newest video frame from the source. |
 | `duration` | number | no | Positive seconds to record after T. Omit for an open recording ended later with `/records/stop`. |
 | `pre_event_duration` | number | no | Seconds of history before T to keep, 0-300, default 0. Must already be in the buffer. |
 | `metadata` | object | no | Arbitrary metadata to store with the record. |
@@ -570,17 +570,19 @@ Content-Type: application/json
 | Status | `error_code` | Meaning |
 |---|---|---|
 | 201 | — | Record accepted in the `recording` state. Acceptance does not mean the media is finished. |
-| 400 | `invalid_request` / `invalid_selector` / `invalid_timestamp` | Malformed body or missing `start_ts` (`invalid_request`); malformed `stream_id` (`invalid_selector`); invalid or future `start_ts` (`invalid_timestamp`); invalid `duration` or `pre_event_duration` (`invalid_request`). |
+| 400 | `invalid_request` / `invalid_selector` / `invalid_timestamp` | Malformed body or missing `start_ts` (`invalid_request`); malformed `stream_id` (`invalid_selector`); invalid `start_ts`, or `start_ts` later than the newest video frame (`invalid_timestamp`); invalid `duration` or `pre_event_duration` (`invalid_request`). |
 | 404 | `stream_not_found` | Unknown stream. |
 | 409 | `history_unavailable` | Requested history unavailable, or the stream is not buffering with NTP-synced timestamps. |
 | 429 | `capacity_exhausted` | Recording capacity reached. |
+| 507 | `storage_full` | The recording storage quota is reached. Delete recordings to free space. |
 
 ### Stop an open recording
 
 `POST /records/stop`
 
-Stops an open recording. The stop time is fixed and does not move if the request is
-repeated. An already finished recording returns `200` with the current record.
+Stops an open recording. The stop time is the time of the newest video frame from
+the source, on the source clock. The host clock is not used. The stop time is fixed
+and does not move if the request is repeated. An already finished recording returns `200` with the current record.
 
 **Request body — `RecordStop`**
 
@@ -643,6 +645,7 @@ Content-Type: application/json
 | 400 | `invalid_request` | Malformed body or invalid `recording_id`. |
 | 404 | `recording_not_found` | Unknown recording. |
 | 409 | `record_not_ready` | The record is not an active open recording. Repeated stops while finalizing retain the original stop target and return `202`. |
+| 409 | `history_unavailable` | The source sent no video frame after the recording start. |
 
 ### Find records
 
@@ -710,7 +713,7 @@ No matches returns `200` with an empty `items` list, never `404`.
 | Status | `error_code` | Meaning |
 |---|---|---|
 | 200 | — | Page of `Recording` objects. |
-| 400 | `invalid_request` / `invalid_timestamp` | Invalid ID, state, metadata filter, cursor, or limit (`invalid_request`); invalid timestamp filter (`invalid_timestamp`). |
+| 400 | `invalid_request` / `invalid_timestamp` | Invalid ID, state, metadata filter, cursor, or limit (`invalid_request`); invalid timestamp filter (`invalid_timestamp`). Stream Manager reports all invalid ID, state, `limit`, and timestamp parameters together in `error_detail`, one per line. The code is `invalid_timestamp` only when all of them are timestamp errors. |
 
 ### Get a record
 
@@ -769,9 +772,13 @@ Content-Type: application/json
 
 `DELETE /records/{recording-id}`
 
-Deletes the record's metadata and its media. The reply returns once the metadata row is
-gone; if the media delete fails afterward, it is only logged, not surfaced to the caller.
-Deleting again, or reading it afterwards, returns `404`.
+Deletes the record's metadata first, then attempts to delete its media. If metadata
+deletion fails, the request returns `503` and the media stays unchanged.
+If media deletion fails or an extraction still uses the media, the request returns
+`200`. Stream Manager logs the deferred deletion. The cleanup job retries removal of
+media without metadata at startup and every 24 hours. The media continues to count
+toward the storage quota until it is removed.
+Deleting again, or reading the deleted recording, returns `404`.
 
 ```bash
 curl -i -X DELETE http://localhost:8080/v1/records/rec-2
@@ -789,31 +796,42 @@ Content-Type: application/json
 | 200 | — | Record deleted. |
 | 404 | `recording_not_found` | Unknown or already deleted recording. |
 | 409 | `record_not_ready` | Record is still recording or finalizing. |
-| 503 | `storage_unavailable` | Metadata deletion failed. The record remains; retry later. |
+| 503 | `storage_unavailable` | Metadata deletion failed. The record and media remain; retry later. |
 
 ---
 
-## Replay APIs
+## Retrieval APIs
 
-Extracts media from a `ready` record. Frame and clip endpoints return JSON by default
-or media bytes when the `Accept` header allows them. Their `/url` endpoints return a
-JSON `MediaResult` with a link to the produced file.
+Extracts media from a `ready` record. Use the `Accept` header to select the response.
+There are no separate `/url` endpoints.
+
+| `Accept` | Response |
+|---|---|
+| Missing, `*/*`, or `application/json` | JSON `MediaResult` with a temporary download link. |
+| `image/jpeg` or `image/png` on `/frame` | Image bytes in the selected format. |
+| `video/mp4` on `/clip` | MP4 bytes. |
+| No acceptable supported type | `406 not_acceptable`. |
+
+The service respects quality values (`q`) and excludes types with `q=0`.
+For equal quality values, the service prefers JSON, then JPEG, then PNG.
+Responses include `Vary: Accept`. Errors use JSON, including errors for binary requests.
+The `/media` endpoint serves the file referenced by a JSON response.
 
 ### Extract a frame
 
-`GET /replays/{recording-id}/frame`
+`GET /retrieve/{recording-id}/frame`
 
 | Parameter | In | Type | Required | Description |
 |---|---|---|---|---|
 | `recording-id` | path | string | yes | The recording, e.g. `rec-2`. |
 | `timestamp` | query | date-time | yes | Time wanted; must fall inside `[start_ts, end_ts)`. |
-| `format` | query | string | no | `jpeg` (default) or `png`. |
+| `format` | query | string | no | Optional image format: `jpeg` or `png`. JSON links default to JPEG. For binary responses, `Accept` selects the format when this parameter is absent. A conflict with an explicit format returns `406`. |
 | `match` | query | string | no | `nearest` (default, ties go to the earlier frame) or `exact` (404 if nothing sits exactly on that time). |
 
 **JSON reply (default `Accept: application/json`)**
 
 ```bash
-curl -i "http://localhost:8080/v1/replays/rec-2/frame?timestamp=2026-09-16T09:12:03.400000000Z"
+curl -i "http://localhost:8080/v1/retrieve/rec-2/frame?timestamp=2026-09-16T09:12:03.400000000Z"
 ```
 
 ```http
@@ -826,8 +844,6 @@ Cache-Control: no-store
 {
   "recording_id": "rec-2",
   "sensor_id": "cam-07",
-  "media_type": "frame",
-  "content_type": "image/jpeg",
   "requested_start_ts": "2026-09-16T09:12:03.400000000Z",
   "requested_end_ts": null,
   "start_ts": "2026-09-16T09:12:03.400000000Z",
@@ -840,7 +856,7 @@ Cache-Control: no-store
 **Raw bytes reply with a `png` format and nearest match**
 
 ```bash
-curl -i "http://localhost:8080/v1/replays/rec-2/frame?timestamp=2026-09-16T09:12:03.700000000Z&format=png&match=nearest" \
+curl -i "http://localhost:8080/v1/retrieve/rec-2/frame?timestamp=2026-09-16T09:12:03.700000000Z&format=png&match=nearest" \
   -H 'Accept: image/png' \
   -o frame.png
 ```
@@ -857,49 +873,16 @@ X-Exact-Match: false
 | 200 | — | `MediaResult`, or the image bytes when an image `Accept` header is used. |
 | 400 | `invalid_timestamp` | Missing or invalid `timestamp`. |
 | 400 | `invalid_request` | Unsupported `format` or `match`. |
-| 404 | `recording_not_found` / `frame_not_found` | Recording not found, timestamp outside coverage, or exact frame missing. |
+| 404 | `recording_not_found` / `frame_not_found` | Recording not found, timestamp outside coverage, exact frame missing, or no decodable frame available for the requested time. |
 | 406 | `not_acceptable` | Incompatible `Accept` header. |
 | 409 | `record_not_ready` | Record not ready. |
 | 429 | `capacity_exhausted` | Extraction capacity reached. |
+| 507 | `storage_full` | The recording storage quota is reached. Delete recordings to free space. |
 | 503 | `storage_unavailable` | Extraction or storage failure. |
-
-### Get an HTTP link to a frame
-
-`GET /replays/{recording-id}/frame/url`
-
-Same parameters as [Extract a frame](#extract-a-frame), but returns a `MediaResult`
-link as JSON. The `Accept` header must allow `application/json`.
-
-```bash
-curl -i "http://localhost:8080/v1/replays/rec-2/frame/url?timestamp=2026-09-16T09:12:03.400000000Z&format=jpeg&match=exact"
-```
-
-```http
-HTTP/1.1 200 OK
-Content-Type: application/json
-X-Frame-Timestamp: 2026-09-16T09:12:03.400000000Z
-X-Exact-Match: true
-Cache-Control: no-store
-
-{
-  "recording_id": "rec-2",
-  "sensor_id": "cam-07",
-  "media_type": "frame",
-  "content_type": "image/jpeg",
-  "requested_start_ts": "2026-09-16T09:12:03.400000000Z",
-  "requested_end_ts": null,
-  "start_ts": "2026-09-16T09:12:03.400000000Z",
-  "end_ts": null,
-  "url": "/v1/media/rec-2/frame-3000000000.jpg",
-  "expiry_ts": "2026-09-16T09:20:00.000000000Z"
-}
-```
-
-Status codes and `error_code`s are identical to [Extract a frame](#extract-a-frame).
 
 ### Extract a clip
 
-`GET /replays/{recording-id}/clip`
+`GET /retrieve/{recording-id}/clip`
 
 The whole requested span must be covered by the recording; a gap returns `404`.
 
@@ -911,7 +894,7 @@ The whole requested span must be covered by the recording; a gap returns `404`.
 | `format` | query | string | no | `mp4` (default) |
 
 ```bash
-curl -i "http://localhost:8080/v1/replays/rec-2/clip?start_ts=2026-09-16T09:12:00.400000000Z&duration=5"
+curl -i "http://localhost:8080/v1/retrieve/rec-2/clip?start_ts=2026-09-16T09:12:00.400000000Z&duration=5"
 ```
 
 ```http
@@ -924,8 +907,6 @@ Cache-Control: no-store
 {
   "recording_id": "rec-2",
   "sensor_id": "cam-07",
-  "media_type": "clip",
-  "content_type": "video/mp4",
   "requested_start_ts": "2026-09-16T09:12:00.400000000Z",
   "requested_end_ts": "2026-09-16T09:12:05.400000000Z",
   "start_ts": "2026-09-16T09:12:00.400000000Z",
@@ -938,7 +919,7 @@ Cache-Control: no-store
 **Raw clip bytes in `mp4` format**
 
 ```bash
-curl -i "http://localhost:8080/v1/replays/rec-2/clip?start_ts=2026-09-16T09:12:00.400000000Z&duration=8&format=mp4" \
+curl -i "http://localhost:8080/v1/retrieve/rec-2/clip?start_ts=2026-09-16T09:12:00.400000000Z&duration=8&format=mp4" \
   -H 'Accept: video/mp4' \
   -o clip.mp4
 ```
@@ -948,31 +929,23 @@ curl -i "http://localhost:8080/v1/replays/rec-2/clip?start_ts=2026-09-16T09:12:0
 | 200 | — | `MediaResult`, or video bytes when a video `Accept` header is used. |
 | 400 | `invalid_timestamp` | Missing or invalid `start_ts`. |
 | 400 | `invalid_request` | Missing or invalid `duration`, or unsupported `format`. |
-| 404 | `recording_not_found` / `clip_not_found` | Recording not found, or the requested interval is not fully covered. |
+| 404 | `recording_not_found` / `clip_not_found` | Recording not found, the requested interval is not fully covered, or no clip available for the requested interval. |
 | 406 | `not_acceptable` | Incompatible `Accept` header. |
 | 409 | `record_not_ready` | Record not ready. |
 | 429 | `capacity_exhausted` | Extraction capacity reached. |
+| 507 | `storage_full` | The recording storage quota is reached. Delete recordings to free space. |
 | 503 | `storage_unavailable` | Extraction or storage failure. |
-
-### Get an HTTP link to a clip
-
-`GET /replays/{recording-id}/clip/url`
-
-Same parameters as [Extract a clip](#extract-a-clip), but returns a `MediaResult` link
-as JSON. The `Accept` header must allow `application/json`.
-
-```bash
-curl -i "http://localhost:8080/v1/replays/rec-2/clip/url?start_ts=2026-09-16T09:12:00.400000000Z&duration=5&format=mp4"
-```
-
-Status codes and `error_code`s are identical to [Extract a clip](#extract-a-clip).
 
 ### Get produced media
 
 `GET /media/{recording-id}/{file}`
 
-Serves the bytes of a frame or clip named by a `MediaResult`'s `url`. The file is kept
-only until its `expiry_ts`, which is capped by the recording's own `expiry_ts`.
+Serves the bytes of a frame or clip named by a `MediaResult`'s `url`. When
+`DerivedMediaTTL` is greater than `0`, the file is available for that many minutes
+after it is cut, capped by the recording's own `expiry_ts`. Set `DerivedMediaTTL` to
+`-1` to disable this TTL. In that case, the file stays available until its recording
+expires or is deleted. `expiry_ts` is `null` when neither expiry applies. See
+[Configuration](../configuration.md#frame-and-clip-lifetime).
 
 | Parameter | In | Type | Required | Description |
 |---|---|---|---|---|
@@ -1004,11 +977,11 @@ X-Content-Type-Options: nosniff
 |---|---|---|
 | `invalid_request` | 400 | The request is malformed, or its fields contradict each other. |
 | `invalid_selector` | 400 | `stream_id` in `POST /records/start` is missing or malformed. |
-| `invalid_timestamp` | 400 | A timestamp is malformed or out of range. A future `start_ts` in `POST /records/start` also uses this code. A missing `start_ts` there returns `invalid_request`. |
+| `invalid_timestamp` | 400 | A timestamp is malformed or out of range. A `start_ts` in `POST /records/start` that is later than the newest video frame from the source also uses this code. A missing `start_ts` there returns `invalid_request`. |
 | `stream_not_found` | 404 | The stream is unknown or has been detached. |
 | `recording_not_found` | 404 | The recording is unknown or has been deleted. |
-| `frame_not_found` | 404 | The requested frame is not covered, no frame sits at the exact requested time (`match=exact`), or a frame file is missing or expired. |
-| `clip_not_found` | 404 | The requested clip interval is not covered, or a clip file is missing or expired. |
+| `frame_not_found` | 404 | The requested frame is not covered, no frame sits at the exact requested time (`match=exact`), no decodable frame is available for the requested time, or a frame file is missing or expired. |
+| `clip_not_found` | 404 | The requested clip interval is not covered, no clip is available for the requested interval, or a clip file is missing or expired. |
 | `not_acceptable` | 406 | The `Accept` header cannot be satisfied. |
 | `stream_exists` | 409 | The same `source_uri` is already attached for that `sensor_id`; the existing `stream_id` is named in `error_detail`. |
 | `record_not_ready` | 409 | The record is not in a state that allows the requested action. |
@@ -1017,4 +990,5 @@ X-Content-Type-Options: nosniff
 | `unsupported_media` | 415 | The source is not RTSP/RTSPS H.264/H.265 video. |
 | `capacity_exhausted` | 429 | Capacity limit reached for a stream, recording, or extraction. |
 | `internal_error` | 500 | An unexpected server-side failure. |
+| `storage_full` | 507 | The recording storage quota (`RecordingStorageSize`) is reached. |
 | `storage_unavailable` | 503 | Storage or media processing failed. |
