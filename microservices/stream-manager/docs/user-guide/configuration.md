@@ -46,20 +46,6 @@ schedule.
 > The quota does not include the database file. A recording can go above the quota by
 > a small amount when FFmpeg finishes the file.
 
-### Recording retention
-
-`RecordingRetention` sets when new frame and clip extraction becomes unavailable.
-The timer starts when the recording finishes processing or fails. Set it to `0` to
-give new recordings no expiry. Changing this setting does not change expiry timestamps
-already stored for finished recordings.
-
-### Frame and clip lifetime
-
-Derived frames and clips do not expire automatically. Their URLs remain available
-after recording expiry, automatic cleanup, and service restart.
-`DerivedMediaTTL` remains reserved for future use. Derived responses report
-`expiry_ts: null`.
-
 ### Cleanup schedule
 
 Cleanup runs at startup and every 24 hours while the service runs. No additional
@@ -76,6 +62,7 @@ downloads of existing derived media. Recording deletion can occur up to 24 hours
 later during normal operation. An active recording, extraction, or deletion failure
 can delay cleanup until a later run.
 
+Changing `RecordingRetention` does not change expiry times already assigned.
 Cleanup still processes previously expired recordings when `RecordingRetention` is
 `0`. Manual deletion removes a recording and its frames and clips without waiting
 for the schedule. Use the original recording ID to delete retained frames and clips,
