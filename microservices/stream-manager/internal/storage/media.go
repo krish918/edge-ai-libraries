@@ -30,7 +30,9 @@ type MediaHandler interface {
 	PutMedia(ctx context.Context, uri string) (string, int64, error)
 	OpenMedia(ctx context.Context, uri string) (string, error)
 	DeleteMedia(ctx context.Context, uri string) error
+	DeleteMediaByID(ctx context.Context, recordingID string) error
 	DeleteSourceMedia(ctx context.Context, uri string) error
+	DeleteSourceMediaIf(ctx context.Context, uri string, eligible func() (bool, error)) (bool, error)
 	PutDerived(ctx context.Context, uri, name string, write func(path string) error) (string, time.Time, error)
 	OpenDerived(ctx context.Context, uri, name string) (*os.File, error)
 	OpenDerivedByID(ctx context.Context, recordingID, name string) (*os.File, error)
@@ -360,11 +362,38 @@ func (s *MediaStore) DeleteMedia(ctx context.Context, uri string) error {
 	if err != nil {
 		return err
 	}
-	dir := filepath.Dir(relative)
+	err = s.DeleteMediaByID(ctx, filepath.Dir(relative))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	return err
+}
+
+// DeleteMediaByID removes all media, including retained files without metadata.
+func (s *MediaStore) DeleteMediaByID(ctx context.Context, dir string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if !validRecordingID(dir) {
+		return fs.ErrNotExist
+	}
 	s.mu.Lock()
 	if s.readers[dir] > 0 || s.deleting[dir] {
 		s.mu.Unlock()
 		return ErrMediaBusy
+	}
+	info, err := s.root.Lstat(dir)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			s.used -= s.usage[dir]
+			delete(s.usage, dir)
+		}
+		s.mu.Unlock()
+		return err
+	}
+	if !info.IsDir() {
+		s.mu.Unlock()
+		return errors.New("recording media is not a directory")
 	}
 	s.deleting[dir] = true
 	s.mu.Unlock()
@@ -390,18 +419,30 @@ func (s *MediaStore) DeleteMedia(ctx context.Context, uri string) error {
 
 // DeleteSourceMedia removes a recording while retaining all derived files.
 func (s *MediaStore) DeleteSourceMedia(ctx context.Context, uri string) error {
+	_, err := s.DeleteSourceMediaIf(ctx, uri, func() (bool, error) { return true, nil })
+	return err
+}
+
+// DeleteSourceMediaIf checks eligibility under the lease mutex before reserving
+// deletion. eligible must not call back into the media store.
+func (s *MediaStore) DeleteSourceMediaIf(ctx context.Context, uri string, eligible func() (bool, error)) (bool, error) {
 	if err := ctx.Err(); err != nil {
-		return err
+		return false, err
 	}
 	relative, err := s.relativeMedia(uri)
 	if err != nil {
-		return err
+		return false, err
 	}
 	dir := filepath.Dir(relative)
 	s.mu.Lock()
 	if s.readers[dir] > 0 || s.deleting[dir] {
 		s.mu.Unlock()
-		return ErrMediaBusy
+		return false, ErrMediaBusy
+	}
+	allowed, err := eligible()
+	if err != nil || !allowed {
+		s.mu.Unlock()
+		return false, err
 	}
 	s.deleting[dir] = true
 	s.mu.Unlock()
@@ -431,7 +472,7 @@ func (s *MediaStore) DeleteSourceMedia(ctx context.Context, uri string) error {
 	defer s.mu.Unlock()
 	delete(s.deleting, dir)
 	if sizeErr != nil {
-		return errors.Join(removeErr, sizeErr)
+		return false, errors.Join(removeErr, sizeErr)
 	}
 	s.used += remaining - s.usage[dir]
 	if remaining == 0 {
@@ -439,7 +480,7 @@ func (s *MediaStore) DeleteSourceMedia(ctx context.Context, uri string) error {
 	} else {
 		s.usage[dir] = remaining
 	}
-	return removeErr
+	return removeErr == nil, removeErr
 }
 
 // relativeDerived returns the directory, relative to the root, that holds the

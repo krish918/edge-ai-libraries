@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"math"
 	"os/exec"
@@ -318,17 +319,22 @@ func (s *Service) DeleteRecording(ctx context.Context, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	rec, err := s.metadata.GetMetadataByRecordingID(ctx, id)
-	if err != nil {
+	missing := errors.Is(err, storage.ErrNotFound)
+	if err != nil && !missing {
 		return err
 	}
 	if rec.State == "recording" || rec.State == "finalizing" || s.jobs[id] != nil {
 		return ErrConflict
 	}
-	return s.deleteRecording(ctx, id, rec.RecordingPath)
-}
-
-func (s *Service) deleteRecording(ctx context.Context, id, uri string) error {
-	if err := s.media.DeleteMedia(ctx, uri); errors.Is(err, storage.ErrMediaBusy) {
+	if missing {
+		err = s.media.DeleteMediaByID(ctx, id)
+	} else {
+		err = s.media.DeleteMedia(ctx, rec.RecordingPath)
+	}
+	if errors.Is(err, fs.ErrNotExist) {
+		return storage.ErrNotFound
+	}
+	if errors.Is(err, storage.ErrMediaBusy) {
 		return ErrConflict
 	} else if err != nil {
 		return fmt.Errorf("%w: %w", ErrCleanup, err)

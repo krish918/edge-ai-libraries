@@ -95,22 +95,25 @@ func (s *Service) expireRecordings(ctx context.Context, now time.Time) error {
 }
 
 func (s *Service) cleanupRecording(ctx context.Context, id, uri string, now time.Time) error {
-	rec, err := s.metadata.GetMetadataByRecordingID(ctx, id)
-	if err != nil && !errors.Is(err, storage.ErrNotFound) {
-		return fmt.Errorf("read recording %s for cleanup: %w", id, err)
-	}
-	if err == nil {
-		if rec.State == "recording" || rec.State == "finalizing" ||
-			rec.ExpiryTS == nil || now.Before(*rec.ExpiryTS) {
-			return nil
+	deleted, err := s.media.DeleteSourceMediaIf(ctx, uri, func() (bool, error) {
+		rec, err := s.metadata.GetMetadataByRecordingID(ctx, id)
+		if errors.Is(err, storage.ErrNotFound) {
+			return true, nil
 		}
-		uri = rec.RecordingPath
-	}
-	if err := s.media.DeleteSourceMedia(ctx, uri); errors.Is(err, storage.ErrMediaBusy) {
+		if err != nil {
+			return false, fmt.Errorf("read recording %s for cleanup: %w", id, err)
+		}
+		return rec.State != "recording" && rec.State != "finalizing" &&
+			rec.ExpiryTS != nil && !now.Before(*rec.ExpiryTS), nil
+	})
+	if errors.Is(err, storage.ErrMediaBusy) {
 		slog.Debug("recording cleanup deferred while media is in use", "recording_id", id)
 		return nil
 	} else if err != nil {
 		return fmt.Errorf("clean recording %s: %w", id, err)
+	}
+	if !deleted {
+		return nil
 	}
 	if err := s.metadata.DeleteMetadata(ctx, id); err != nil && !errors.Is(err, storage.ErrNotFound) {
 		return fmt.Errorf("delete recording metadata %s: %w", id, err)

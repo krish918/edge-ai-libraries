@@ -23,14 +23,18 @@ import (
 
 type testMedia struct {
 	*storage.MediaStore
-	deleteErr error
+	deleteErr    error
+	beforeDelete func()
 }
 
-func (m *testMedia) DeleteSourceMedia(ctx context.Context, uri string) error {
-	if m.deleteErr != nil {
-		return m.deleteErr
+func (m *testMedia) DeleteSourceMediaIf(ctx context.Context, uri string, eligible func() (bool, error)) (bool, error) {
+	if m.beforeDelete != nil {
+		m.beforeDelete()
 	}
-	return m.MediaStore.DeleteSourceMedia(ctx, uri)
+	if m.deleteErr != nil {
+		return false, m.deleteErr
+	}
+	return m.MediaStore.DeleteSourceMediaIf(ctx, uri, eligible)
 }
 
 type testMetadata struct {
@@ -218,6 +222,46 @@ func TestRetainedDerivedSurvivesRestart(t *testing.T) {
 	reopened.assertDerivedAvailable(t, rec.RecordingID)
 	if got := media.UsedBytes(); got != int64(len("derived")) {
 		t.Fatalf("retained derived quota was lost on restart: %d", got)
+	}
+}
+
+func TestCleanupRechecksOrphanCandidate(t *testing.T) {
+	e := newTestEnv(t)
+	ctx := context.Background()
+	now := time.Now()
+	id := uuid.NewString()
+	filename, uri, release, err := e.media.PrepareMediaWithLease(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	e.media.beforeDelete = func() {
+		e.media.beforeDelete = nil
+		if err := os.WriteFile(filename, []byte("source"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := e.media.PutMedia(ctx, uri); err != nil {
+			t.Fatal(err)
+		}
+		future := now.Add(time.Hour)
+		_, err := e.metadata.CreateMetadata(ctx, model.Recording{
+			RecordingID: id, SensorID: "cleanup-test", State: "ready",
+			RecordingPath: uri, StartTS: now.Add(-time.Minute),
+			EndTS: &now, CreationTS: now, ExpiryTS: &future,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		release()
+	}
+	if err := e.service.sweep(ctx, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filename); err != nil {
+		t.Fatalf("newly completed recording source was deleted: %v", err)
+	}
+	if _, err := e.metadata.GetMetadataByRecordingID(ctx, id); err != nil {
+		t.Fatalf("newly completed recording metadata was deleted: %v", err)
 	}
 }
 

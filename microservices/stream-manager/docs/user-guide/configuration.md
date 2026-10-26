@@ -23,7 +23,7 @@ This page lists each setting, its purpose, and its default value.
 | `StorageDir` | string | — | `~/.local/share/stream-manager` | Directory where the database and recordings are stored. |
 | `ConcurrentRecorders` | integer | count | `10` | Maximum number of recordings that can run at the same time. |
 | `RecordingStorageSize` | integer | megabytes | `10240` | Storage quota for recorded media and the frames and clips cut from it. Must be between 5120 and 1073741824. |
-| `RecordingRetention` | integer | hours | `0` | Time from completion until a recording expires. Cleanup removes expired recording source files and metadata but keeps derived media. `0` does not set an expiry time. Must be between 0 and 360. |
+| `RecordingRetention` | integer | hours | `0` | Time from completion until a recording expires. Cleanup removes expired recordings but keeps existing frames and clips. `0` does not set an expiry time. Must be between 0 and 360. |
 | `DerivedMediaTTL` | integer | minutes | `0` | Reserved for future use. Valid values are 0-1440. No value currently expires or deletes derived media. A nonzero value produces a startup warning. |
 
 ### Storage quota
@@ -48,7 +48,7 @@ schedule.
 
 ### Recording retention
 
-`RecordingRetention` sets when retrieval expires for finished and failed recordings.
+`RecordingRetention` sets when new frame and clip extraction becomes unavailable.
 The timer starts when the recording finishes processing or fails. Set it to `0` to
 give new recordings no expiry. Changing this setting does not change expiry timestamps
 already stored for finished recordings.
@@ -56,7 +56,7 @@ already stored for finished recordings.
 ### Frame and clip lifetime
 
 Derived frames and clips do not expire automatically. Their URLs remain available
-after recording expiry, automatic source cleanup, and service restart.
+after recording expiry, automatic cleanup, and service restart.
 `DerivedMediaTTL` remains reserved for future use. Derived responses report
 `expiry_ts: null`.
 
@@ -65,27 +65,26 @@ after recording expiry, automatic source cleanup, and service restart.
 Cleanup runs at startup and every 24 hours while the service runs. No additional
 grace period applies after recording expiry.
 
-- Cleanup deletes expired recording source files and metadata.
-- Cleanup removes orphaned recording source files and empty recording directories.
-- Cleanup preserves every file in `<recording-dir>/derived/`.
+- Cleanup removes expired recordings.
+- Cleanup keeps existing frames, clips, and their URLs.
 - Cleanup skips active recordings and recordings used by frame or clip extraction.
 - Cleanup retries failed deletions on the next run.
-- Cleanup releases the quota charged to deleted source files.
+- Cleanup frees the storage space used by deleted recordings.
 
 Recording expiry blocks new frame and clip extraction immediately. It does not block
-downloads of existing derived media. Physical source deletion can occur up to 24 hours
+downloads of existing derived media. Recording deletion can occur up to 24 hours
 later during normal operation. An active recording, extraction, or deletion failure
 can delay cleanup until a later run.
 
 Cleanup still processes previously expired recordings when `RecordingRetention` is
-`0`. Explicit manual deletion remains separate: it removes a recording and its
-derived files without waiting for the schedule. If extraction is active, manual
-deletion returns `409`; retry later.
+`0`. Manual deletion removes a recording and its frames and clips without waiting
+for the schedule. Use the original recording ID to delete retained frames and clips,
+even after automatic cleanup. If extraction is active, manual deletion returns `409`;
+retry later.
 
 > [!NOTE]
 > Retained derived media continues to count toward the storage quota. Automatic
-> recording cleanup does not reclaim those bytes. Derived-media retirement is not
-> implemented yet.
+> recording cleanup does not reclaim those bytes.
 
 ## Example
 

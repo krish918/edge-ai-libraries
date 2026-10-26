@@ -461,7 +461,7 @@ paths:
     delete:
       tags: [Recording Storage APIs]
       summary: Delete a record
-      description: Deletes the recording and all derived media. An active recording or extraction returns 409; retry later. Successful deletion returns 200. Deleting again, or reading a deleted record, returns 404.
+      description: Deletes the recording and all derived media. Use the original recording ID to delete retained frames and clips after automatic cleanup. An active recording or extraction returns 409; retry later. Successful deletion returns 200. Deleting again, or reading a deleted record, returns 404.
       parameters:
         - $ref: '#/components/parameters/RecordingId'
       responses:
@@ -472,7 +472,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Deletion'
         '404':
-          description: Unknown or already deleted recording.
+          description: No recording or retained frame or clip exists for this ID.
           content:
             application/json:
               schema:
@@ -494,7 +494,7 @@ paths:
                     error_code: record_not_ready
                     error_detail: recording cannot be changed in its current state
         '503':
-          description: Media or metadata deletion failed. Metadata remains for retry; some media may already be deleted.
+          description: Deletion failed. Some media may already be deleted; retry later.
           content:
             application/json:
               schema:
@@ -823,7 +823,7 @@ paths:
                 type: string
                 format: binary
         '404':
-          description: An invalid recording identifier returns recording_not_found. A missing frame returns frame_not_found; a missing clip returns clip_not_found. Recording metadata is not required.
+          description: An invalid recording identifier returns recording_not_found. A missing frame returns frame_not_found; a missing clip returns clip_not_found.
           content:
             application/json:
               schema:

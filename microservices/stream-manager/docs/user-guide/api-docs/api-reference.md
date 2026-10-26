@@ -771,6 +771,7 @@ Content-Type: application/json
 
 Deletes the recording and all its derived media. An active recording or extraction
 returns `409`; retry later. Successful deletion returns `200`.
+Use the original recording ID to delete retained frames and clips after automatic cleanup.
 Deleting again, or reading the deleted recording, returns `404`.
 
 ```bash
@@ -787,9 +788,9 @@ Content-Type: application/json
 | Status | `error_code` | Meaning |
 |---|---|---|
 | 200 | — | Record deleted. |
-| 404 | `recording_not_found` | Unknown or already deleted recording. |
+| 404 | `recording_not_found` | No recording or retained frame or clip exists for this ID. |
 | 409 | `record_not_ready` | Record is still recording, finalizing, or in use by an extraction. |
-| 503 | `storage_unavailable` | Media or metadata deletion failed. Metadata remains for retry; some media may already be deleted. |
+| 503 | `storage_unavailable` | Deletion failed. Some media may already be deleted; retry later. |
 
 ---
 

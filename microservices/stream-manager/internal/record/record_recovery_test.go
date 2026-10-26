@@ -101,6 +101,10 @@ func (failingMedia) DeleteMedia(context.Context, string) error {
 	return errors.New("disk gone")
 }
 
+func (failingMedia) DeleteMediaByID(context.Context, string) error {
+	return errors.New("disk gone")
+}
+
 type failingMetadata struct{ *storage.MetadataStore }
 
 func (failingMetadata) DeleteMetadata(context.Context, string) error { return errors.New("db gone") }
@@ -181,5 +185,24 @@ func TestDeleteOrder(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Dir(filename)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("media kept: %v", err)
+	}
+
+	rec, filename = seed(t, metadata, media, "ready")
+	if err := metadata.DeleteMetadata(ctx, rec.RecordingID); err != nil {
+		t.Fatal(err)
+	}
+	svc.media = failingMedia{media}
+	if err := svc.DeleteRecording(ctx, rec.RecordingID); !errors.Is(err, ErrCleanup) {
+		t.Fatalf("retained media deletion failure was not reported: %v", err)
+	}
+	if _, err := os.Stat(filename); err != nil {
+		t.Fatalf("failed retained media deletion removed media: %v", err)
+	}
+	svc.media = media
+	if err := svc.DeleteRecording(ctx, rec.RecordingID); err != nil {
+		t.Fatalf("retained media deletion retry failed: %v", err)
+	}
+	if err := svc.DeleteRecording(ctx, rec.RecordingID); !errors.Is(err, storage.ErrNotFound) {
+		t.Fatalf("repeated deletion should report not found: %v", err)
 	}
 }
