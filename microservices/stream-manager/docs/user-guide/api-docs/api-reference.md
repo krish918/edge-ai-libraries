@@ -150,7 +150,7 @@ One record is one recording of one sensor.
 | `size_bytes` | integer, nullable | Size of the finished media; `null` until `ready`. |
 | `metadata` | object | Whatever metadata the caller supplied, or `{}` if none was. |
 | `creation_ts` | string (date-time) | Record creation time. |
-| `expiry_ts` | string (date-time), nullable | When retrieval becomes unavailable. It is set when the recording becomes `ready` or `failed` and `RecordingRetention` is set. |
+| `expiry_ts` | string (date-time), nullable | When new frame and clip extraction becomes unavailable. It is set when the recording becomes `ready` or `failed` and `RecordingRetention` is set. Existing derived media remains available. |
 | `error_detail` | string, nullable | A short reason. It is present when `state` is `failed`. It is also present when `state` is `ready` and the storage quota stopped the recording early. |
 
 ```json
@@ -182,8 +182,8 @@ media.
 | `requested_end_ts` | string (date-time), nullable | End the caller asked for (exclusive); `null` for a single frame. |
 | `start_ts` | string (date-time) | Real time of the returned frame, or first frame of the clip. |
 | `end_ts` | string (date-time), nullable | Where the clip really ends (exclusive); `null` for a single frame. |
-| `url` | string | Origin-relative path that serves the file via [`GET /media/{recording-id}/{file}`](#get-produced-media) until `expiry_ts`. Never points at the original recording. |
-| `expiry_ts` | string (date-time) | When `url` stops working based on `DerivedMediaTTL`. It is `null` when the TTL is disabled. Recording expiry does not change this time. |
+| `url` | string | Origin-relative path that serves the file via [`GET /media/{recording-id}/{file}`](#get-produced-media). Never points at the original recording. |
+| `expiry_ts` | string (date-time), nullable | Reserved for future use. Currently `null`; derived media does not expire automatically. |
 
 ### Deletion
 
@@ -769,10 +769,9 @@ Content-Type: application/json
 
 `DELETE /records/{recording-id}`
 
-Deletes the record's metadata first, then attempts to delete its media. If metadata
-deletion fails, the request returns `503` and the media stays unchanged.
-If media deletion fails or an extraction still uses the media, the request returns
-`200`. Deleting again, or reading the deleted recording, returns `404`.
+Deletes the recording and all its derived media. An active recording or extraction
+returns `409`; retry later. Successful deletion returns `200`.
+Deleting again, or reading the deleted recording, returns `404`.
 
 ```bash
 curl -i -X DELETE http://localhost:8080/v1/records/rec-2
@@ -789,8 +788,8 @@ Content-Type: application/json
 |---|---|---|
 | 200 | — | Record deleted. |
 | 404 | `recording_not_found` | Unknown or already deleted recording. |
-| 409 | `record_not_ready` | Record is still recording or finalizing. |
-| 503 | `storage_unavailable` | Metadata deletion failed. The record and media remain; retry later. |
+| 409 | `record_not_ready` | Record is still recording, finalizing, or in use by an extraction. |
+| 503 | `storage_unavailable` | Media or metadata deletion failed. Metadata remains for retry; some media may already be deleted. |
 
 ---
 
@@ -841,7 +840,7 @@ Cache-Control: no-store
   "start_ts": "2026-09-16T09:12:03.400000000Z",
   "end_ts": null,
   "url": "/v1/media/rec-2/frame-3000000000.jpg",
-  "expiry_ts": "2026-09-16T09:20:00.000000000Z"
+  "expiry_ts": null
 }
 ```
 
@@ -904,7 +903,7 @@ Cache-Control: no-store
   "start_ts": "2026-09-16T09:12:00.400000000Z",
   "end_ts": "2026-09-16T09:12:05.400000000Z",
   "url": "/v1/media/rec-2/clip-0-5000000000.mp4",
-  "expiry_ts": "2026-09-16T09:20:00.000000000Z"
+  "expiry_ts": null
 }
 ```
 
@@ -932,10 +931,8 @@ curl -i "http://localhost:8080/v1/retrieve/rec-2/clip?start_ts=2026-09-16T09:12:
 
 `GET /media/{recording-id}/{file}`
 
-Serves a derived frame or clip. `DerivedMediaTTL` sets how many minutes it remains
-available. Set it to `0` to disable expiry. Recording expiry does not affect derived
-media, but deleting the recording removes it. `expiry_ts` is `null` when expiry is
-disabled. See [Configuration](../configuration.md#frame-and-clip-lifetime).
+Serves a derived frame or clip. Recording expiry and automatic cleanup do not affect
+this URL. Explicit manual deletion of the recording removes its derived media. See [Configuration](../configuration.md#frame-and-clip-lifetime).
 
 | Parameter | In | Type | Required | Description |
 |---|---|---|---|---|
@@ -957,7 +954,7 @@ X-Content-Type-Options: nosniff
 | Status | `error_code` | Meaning |
 |---|---|---|
 | 200 | — | The frame or clip bytes (`image/jpeg`, `image/png`, or `video/mp4`). |
-| 404 | `recording_not_found` / `frame_not_found` / `clip_not_found` | Unknown recording, or the frame or clip is missing or past its `expiry_ts`. |
+| 404 | `recording_not_found` / `frame_not_found` / `clip_not_found` | Invalid recording identifier, or the frame or clip file does not exist. |
 
 ---
 
@@ -969,9 +966,9 @@ X-Content-Type-Options: nosniff
 | `invalid_selector` | 400 | `stream_id` in `POST /records/start` is missing or malformed. |
 | `invalid_timestamp` | 400 | A timestamp is malformed or out of range. A `start_ts` in `POST /records/start` that is later than the newest video frame from the source also uses this code. A missing `start_ts` there returns `invalid_request`. |
 | `stream_not_found` | 404 | The stream is unknown or has been detached. |
-| `recording_not_found` | 404 | The recording is unknown or has been deleted. |
-| `frame_not_found` | 404 | The requested frame is not covered, no frame sits at the exact requested time (`match=exact`), no decodable frame is available for the requested time, or a frame file is missing or expired. |
-| `clip_not_found` | 404 | The requested clip interval is not covered, no clip is available for the requested interval, or a clip file is missing or expired. |
+| `recording_not_found` | 404 | The recording is unknown or has been deleted. Retrieval also returns this code when the recording has expired. |
+| `frame_not_found` | 404 | The requested frame is not covered, no frame sits at the exact requested time (`match=exact`), no decodable frame is available for the requested time, or a frame file is missing. |
+| `clip_not_found` | 404 | The requested clip interval is not covered, no clip is available for the requested interval, or a clip file is missing. |
 | `not_acceptable` | 406 | The `Accept` header cannot be satisfied. |
 | `stream_exists` | 409 | The same `source_uri` is already attached for that `sensor_id`; the existing `stream_id` is named in `error_detail`. |
 | `record_not_ready` | 409 | The record is not in a state that allows the requested action. |

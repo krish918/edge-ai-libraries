@@ -7,6 +7,10 @@ Stream Manager is a microservice for Intel Open Edge Platform. It attaches RTSP 
 keeps a rolling buffer of each stream, and records video on request. It also returns clips and
 frames from a recording for a given time range.
 
+Optional recording retention expires recordings. Cleanup runs at startup and every
+24 hours, without deleting derived frames or clips. See
+[Configuration](docs/user-guide/configuration.md) for retention settings.
+
 ## Quick Start
 
 ### Prerequisites

@@ -70,7 +70,7 @@ func TestStreamRoutes(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	retrievals, err := retrieve.NewService(metadata, media, 15*time.Minute)
+	retrievals, err := retrieve.NewService(metadata, media)
 	if err != nil {
 		t.Fatal(err)
 	}

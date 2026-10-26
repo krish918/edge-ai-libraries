@@ -77,10 +77,11 @@ type job struct {
 	fixed    bool
 	stopped  bool
 	// truncated is set when the storage quota ends the recording early.
-	truncated bool
-	ctx       context.Context
-	cancel    context.CancelFunc
-	err       error
+	truncated    bool
+	releaseMedia func()
+	ctx          context.Context
+	cancel       context.CancelFunc
+	err          error
 }
 
 var _ Recorder = (*Service)(nil)
@@ -208,6 +209,9 @@ func (s *Service) Start(ctx context.Context, options StartOptions) (model.Record
 	rollback := func(cause error) error {
 		cancel()
 		cause = errors.Join(cause, lease.Close())
+		if j.releaseMedia != nil {
+			j.releaseMedia()
+		}
 		if j.uri != "" {
 			cause = errors.Join(cause, s.media.DeleteMedia(context.Background(), j.uri))
 		}
@@ -221,11 +225,12 @@ func (s *Service) Start(ctx context.Context, options StartOptions) (model.Record
 		return model.Recording{}, rollback(err)
 	}
 	shortID := base64.RawURLEncoding.EncodeToString(recordID[:])
-	filename, uri, err := s.media.PrepareMedia(ctx, shortID)
+	filename, uri, releaseMedia, err := s.media.PrepareMediaWithLease(ctx, shortID)
 	if err != nil {
 		return model.Recording{}, rollback(err)
 	}
 	j.id, j.uri, j.filename = shortID, uri, filename
+	j.releaseMedia = releaseMedia
 	if err := s.media.ReserveMedia(ctx, uri, 0); err != nil {
 		return model.Recording{}, rollback(err)
 	}
@@ -319,17 +324,24 @@ func (s *Service) DeleteRecording(ctx context.Context, id string) error {
 	if rec.State == "recording" || rec.State == "finalizing" || s.jobs[id] != nil {
 		return ErrConflict
 	}
-	if err := s.metadata.DeleteMetadata(ctx, id); err != nil {
+	return s.deleteRecording(ctx, id, rec.RecordingPath)
+}
+
+func (s *Service) deleteRecording(ctx context.Context, id, uri string) error {
+	if err := s.media.DeleteMedia(ctx, uri); errors.Is(err, storage.ErrMediaBusy) {
+		return ErrConflict
+	} else if err != nil {
 		return fmt.Errorf("%w: %w", ErrCleanup, err)
 	}
-	if err := s.media.DeleteMedia(ctx, rec.RecordingPath); err != nil {
-		slog.Error("recording media left after delete", "recording_id", id, "error", err)
+	if err := s.metadata.DeleteMetadata(ctx, id); err != nil && !errors.Is(err, storage.ErrNotFound) {
+		return fmt.Errorf("%w: %w", ErrCleanup, err)
 	}
 	return nil
 }
 
 func (s *Service) run(j *job) {
 	defer j.cancel()
+	defer j.releaseMedia()
 	start, end, size, codec, err := s.writeMedia(j)
 	err = errors.Join(err, j.lease.Close())
 	s.mu.Lock()
@@ -360,6 +372,7 @@ func (s *Service) run(j *job) {
 		}
 		j.record.State, j.record.SizeBytes, j.record.ErrorDetail = "failed", nil, &detail
 		_, saveErr := s.metadata.UpdateMetadata(ctx, j.record.RecordingID, j.record)
+		j.releaseMedia()
 		cleanupErr := s.media.DeleteMedia(ctx, j.record.RecordingPath)
 		j.err = errors.Join(saveErr, cleanupErr)
 		s.closeErr = errors.Join(s.closeErr, j.err)

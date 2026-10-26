@@ -26,6 +26,7 @@ import (
 type MediaHandler interface {
 	ListMedia(ctx context.Context) (map[string]string, error)
 	PrepareMedia(ctx context.Context, recordingID string) (filename, uri string, err error)
+	PrepareMediaWithLease(ctx context.Context, recordingID string) (filename, uri string, release func(), err error)
 	PutMedia(ctx context.Context, uri string) (string, int64, error)
 	OpenMedia(ctx context.Context, uri string) (string, error)
 	DeleteMedia(ctx context.Context, uri string) error
@@ -190,6 +191,10 @@ func (s *MediaStore) AcquireMedia(ctx context.Context, uri string) (func(), erro
 	if _, err := s.root.Lstat(dir); err != nil {
 		return nil, err
 	}
+	return s.acquireLocked(dir), nil
+}
+
+func (s *MediaStore) acquireLocked(dir string) func() {
 	s.readers[dir]++
 	var once sync.Once
 	return func() {
@@ -200,7 +205,7 @@ func (s *MediaStore) AcquireMedia(ctx context.Context, uri string) (func(), erro
 				delete(s.readers, dir)
 			}
 		})
-	}, nil
+	}
 }
 
 // UsedBytes returns the bytes charged to all recordings.
@@ -214,7 +219,7 @@ func (s *MediaStore) UsedBytes() int64 {
 var derivedName = regexp.MustCompile(`^(frame-[0-9]+\.(jpeg|png)|clip-[0-9]+-[0-9]+\.mp4)$`)
 
 // ListMedia maps source media and empty orphan directories to their media URIs.
-// Directories with retained derived media are excluded from orphan cleanup.
+// Directories containing only derived media are retained.
 func (s *MediaStore) ListMedia(ctx context.Context) (map[string]string, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -246,6 +251,17 @@ func (s *MediaStore) ListMedia(ctx context.Context) (map[string]string, error) {
 		media[entry.Name()] = (&url.URL{Scheme: "file", Path: path}).String()
 	}
 	return media, nil
+}
+
+// PrepareMediaWithLease protects a new recording before its metadata exists.
+func (s *MediaStore) PrepareMediaWithLease(ctx context.Context, id string) (string, string, func(), error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	filename, uri, err := s.PrepareMedia(ctx, id)
+	if err != nil {
+		return "", "", nil, err
+	}
+	return filename, uri, s.acquireLocked(id), nil
 }
 
 // PrepareMedia reserves a private UUID directory. FFmpeg creates media.ts there.
@@ -372,7 +388,7 @@ func (s *MediaStore) DeleteMedia(ctx context.Context, uri string) error {
 	return removeErr
 }
 
-// DeleteSourceMedia removes a recording while retaining its derived files.
+// DeleteSourceMedia removes a recording while retaining all derived files.
 func (s *MediaStore) DeleteSourceMedia(ctx context.Context, uri string) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -389,7 +405,6 @@ func (s *MediaStore) DeleteSourceMedia(ctx context.Context, uri string) error {
 	}
 	s.deleting[dir] = true
 	s.mu.Unlock()
-
 	removeErr := s.root.Remove(relative)
 	if errors.Is(removeErr, fs.ErrNotExist) {
 		removeErr = nil
@@ -399,9 +414,6 @@ func (s *MediaStore) DeleteSourceMedia(ctx context.Context, uri string) error {
 		derived, err := fs.ReadDir(s.root.FS(), derivedPath)
 		if errors.Is(err, fs.ErrNotExist) {
 			removeErr = s.root.Remove(dir)
-			if errors.Is(removeErr, fs.ErrNotExist) {
-				removeErr = nil
-			}
 		} else if err != nil {
 			removeErr = err
 		} else if len(derived) == 0 {
@@ -409,10 +421,10 @@ func (s *MediaStore) DeleteSourceMedia(ctx context.Context, uri string) error {
 			if removeErr == nil || errors.Is(removeErr, fs.ErrNotExist) {
 				removeErr = s.root.Remove(dir)
 			}
-			if errors.Is(removeErr, fs.ErrNotExist) {
-				removeErr = nil
-			}
 		}
+	}
+	if errors.Is(removeErr, fs.ErrNotExist) {
+		removeErr = nil
 	}
 	remaining, sizeErr := s.dirSize(dir)
 	s.mu.Lock()
@@ -522,15 +534,12 @@ func (s *MediaStore) OpenDerived(ctx context.Context, uri, name string) (*os.Fil
 	return s.openDerived(ctx, filepath.Join(dir, name), name)
 }
 
-// OpenDerivedByID opens a retained frame or clip without recording metadata.
-func (s *MediaStore) OpenDerivedByID(ctx context.Context, recordingID, name string) (*os.File, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	if !validRecordingID(recordingID) || !derivedName.MatchString(name) {
+// OpenDerivedByID opens retained media independently of recording metadata.
+func (s *MediaStore) OpenDerivedByID(ctx context.Context, id, name string) (*os.File, error) {
+	if !validRecordingID(id) || !derivedName.MatchString(name) {
 		return nil, fs.ErrNotExist
 	}
-	return s.openDerived(ctx, filepath.Join(recordingID, derivedDir, name), name)
+	return s.openDerived(ctx, filepath.Join(id, derivedDir, name), name)
 }
 
 func (s *MediaStore) openDerived(ctx context.Context, path, name string) (*os.File, error) {

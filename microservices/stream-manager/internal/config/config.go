@@ -37,7 +37,7 @@ type Config struct {
 	ConcurrentRecorders  int
 	RecordingStorageSize int64         // Bytes allocated to recordings and derived media.
 	RecordingRetention   time.Duration // Zero keeps finished recordings until deleted.
-	DerivedMediaTTL      time.Duration // Zero disables the TTL for derived media.
+	DerivedMediaTTL      time.Duration // Reserved for future use; derived media does not expire.
 }
 
 // Load reads the configuration from config.json (or the file named by SM_CONFIG_FILE),
