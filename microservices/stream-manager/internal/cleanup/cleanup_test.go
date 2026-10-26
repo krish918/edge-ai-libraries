@@ -27,14 +27,14 @@ type testMedia struct {
 	beforeDelete func()
 }
 
-func (m *testMedia) DeleteSourceMediaIf(ctx context.Context, uri string, eligible func() (bool, error)) (bool, error) {
+func (m *testMedia) DeleteSourceMedia(ctx context.Context, uri string, eligible func() (bool, error)) (bool, error) {
 	if m.beforeDelete != nil {
 		m.beforeDelete()
 	}
 	if m.deleteErr != nil {
 		return false, m.deleteErr
 	}
-	return m.MediaStore.DeleteSourceMediaIf(ctx, uri, eligible)
+	return m.MediaStore.DeleteSourceMedia(ctx, uri, eligible)
 }
 
 type testMetadata struct {

@@ -31,8 +31,7 @@ type MediaHandler interface {
 	OpenMedia(ctx context.Context, uri string) (string, error)
 	DeleteMedia(ctx context.Context, uri string) error
 	DeleteMediaByID(ctx context.Context, recordingID string) error
-	DeleteSourceMedia(ctx context.Context, uri string) error
-	DeleteSourceMediaIf(ctx context.Context, uri string, eligible func() (bool, error)) (bool, error)
+	DeleteSourceMedia(ctx context.Context, uri string, eligible func() (bool, error)) (bool, error)
 	PutDerived(ctx context.Context, uri, name string, write func(path string) error) (string, time.Time, error)
 	OpenDerived(ctx context.Context, uri, name string) (*os.File, error)
 	OpenDerivedByID(ctx context.Context, recordingID, name string) (*os.File, error)
@@ -418,16 +417,14 @@ func (s *MediaStore) DeleteMediaByID(ctx context.Context, dir string) error {
 }
 
 // DeleteSourceMedia removes a recording while retaining all derived files.
-func (s *MediaStore) DeleteSourceMedia(ctx context.Context, uri string) error {
-	_, err := s.DeleteSourceMediaIf(ctx, uri, func() (bool, error) { return true, nil })
-	return err
-}
-
-// DeleteSourceMediaIf checks eligibility under the lease mutex before reserving
-// deletion. eligible must not call back into the media store.
-func (s *MediaStore) DeleteSourceMediaIf(ctx context.Context, uri string, eligible func() (bool, error)) (bool, error) {
+// It checks eligibility under the lease mutex before reserving deletion.
+// eligible must not call back into the media store.
+func (s *MediaStore) DeleteSourceMedia(ctx context.Context, uri string, eligible func() (bool, error)) (bool, error) {
 	if err := ctx.Err(); err != nil {
 		return false, err
+	}
+	if eligible == nil {
+		return false, errors.New("source media deletion requires an eligibility check")
 	}
 	relative, err := s.relativeMedia(uri)
 	if err != nil {

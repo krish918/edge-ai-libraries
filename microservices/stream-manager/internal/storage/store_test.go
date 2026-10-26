@@ -161,7 +161,7 @@ func TestDeleteSourceMediaRetainsDerived(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := media.DeleteSourceMedia(ctx, rec.RecordingPath); err != nil {
+	if _, err := media.DeleteSourceMedia(ctx, rec.RecordingPath, alwaysEligible); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(source); !errors.Is(err, os.ErrNotExist) {

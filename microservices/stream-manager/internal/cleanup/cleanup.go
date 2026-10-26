@@ -95,7 +95,7 @@ func (s *Service) expireRecordings(ctx context.Context, now time.Time) error {
 }
 
 func (s *Service) cleanupRecording(ctx context.Context, id, uri string, now time.Time) error {
-	deleted, err := s.media.DeleteSourceMediaIf(ctx, uri, func() (bool, error) {
+	deleted, err := s.media.DeleteSourceMedia(ctx, uri, func() (bool, error) {
 		rec, err := s.metadata.GetMetadataByRecordingID(ctx, id)
 		if errors.Is(err, storage.ErrNotFound) {
 			return true, nil

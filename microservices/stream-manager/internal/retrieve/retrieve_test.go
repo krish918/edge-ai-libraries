@@ -548,7 +548,8 @@ func TestRecordingExpiryPreservesDerivedMedia(t *testing.T) {
 	if _, err := env.svc.Clip(ctx, rec.RecordingID, fixtureStart, time.Second, "mp4"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("got %v, want ErrNotFound", err)
 	}
-	if err := env.mediaStore.DeleteSourceMedia(ctx, rec.RecordingPath); err != nil {
+	deleteAlways := func() (bool, error) { return true, nil }
+	if _, err := env.mediaStore.DeleteSourceMedia(ctx, rec.RecordingPath, deleteAlways); err != nil {
 		t.Fatal(err)
 	}
 	if err := env.metadataStore.DeleteMetadata(ctx, rec.RecordingID); err != nil {
