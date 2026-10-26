@@ -333,6 +333,31 @@ func TestLeaseEndAndTerminalNotification(t *testing.T) {
 	}
 }
 
+func TestLeaseEndAtLiveEdge(t *testing.T) {
+	b := testBuffer(t, 30)
+	start := time.Unix(100, 0).UTC()
+	for seq := 1; seq <= 3; seq++ {
+		addTestSlice(t, b, seq, start.Add(time.Duration(seq-1)*time.Second), time.Now())
+	}
+	lease := requireLease(t, b, start.Add(250*time.Millisecond), time.Time{})
+	if _, err := lease.EndAtLiveEdge(); !errors.Is(err, ErrHistoryUnavailable) {
+		t.Fatalf("lease ended without a live edge: %v", err)
+	}
+	edge := start.Add(1500 * time.Millisecond)
+	b.advanceLiveEdge(edge)
+	b.advanceLiveEdge(start)
+	if got := b.snapshot().BufferStat.LiveEdgeTS; !got.Equal(edge) {
+		t.Fatalf("live edge moved back: %v", got)
+	}
+	end, err := lease.EndAtLiveEdge()
+	if err != nil || !end.Equal(edge) {
+		t.Fatalf("lease end = %v, %v; want %v", end, err, edge)
+	}
+	if b.snapshot().Slices[2].RefCount != 0 {
+		t.Fatal("ending at the live edge retained later slices")
+	}
+}
+
 func TestRollingBufferConcurrentReaders(t *testing.T) {
 	b := testBuffer(t, 30)
 	start := time.Unix(100, 0).UTC()
