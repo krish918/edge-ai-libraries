@@ -770,11 +770,11 @@ Content-Type: application/json
 
 `DELETE /records/{recording-id}`
 
-Deletes the recording and all its derived media. An active recording or extraction
-returns `409`; retry later. Media is deleted before metadata. If media or metadata
-deletion fails, the request returns `503`. Some media may already be deleted; retry
-later. Successful deletion returns `200`.
-Deleting again, or reading the deleted recording, returns `404`.
+Deletes the record's metadata first, then attempts to delete its media, including
+all derived frames and clips. If metadata deletion fails, the request returns `503`
+and the media stays unchanged.
+If media deletion fails or an extraction still uses the media, the request returns
+`200`. Deleting again, or reading the deleted recording, returns `404`.
 
 ```bash
 curl -i -X DELETE http://localhost:8080/v1/records/rec-2
@@ -791,8 +791,8 @@ Content-Type: application/json
 |---|---|---|
 | 200 | — | Record deleted. |
 | 404 | `recording_not_found` | Unknown or already deleted recording. |
-| 409 | `record_not_ready` | Record is still recording, finalizing, or in use by an extraction. |
-| 503 | `storage_unavailable` | Deletion failed. Some media may already be deleted; retry later. |
+| 409 | `record_not_ready` | Record is still recording or finalizing. |
+| 503 | `storage_unavailable` | Metadata deletion failed. The record and media remain; retry later. |
 
 ---
 

@@ -268,12 +268,6 @@ func TestStreamRoutes(t *testing.T) {
 			t.Fatalf("unexpected derived media response: %s %v", response.Body, response.Header())
 		}
 		if !automatic {
-			release, err := media.AcquireMedia(ctx, uri)
-			if err != nil {
-				t.Fatal(err)
-			}
-			request("DELETE", recordPath, "", 409)
-			release()
 			request("DELETE", recordPath, "", 200)
 			request("GET", recordPath, "", 404)
 			request("GET", mediaPath, "", 404)

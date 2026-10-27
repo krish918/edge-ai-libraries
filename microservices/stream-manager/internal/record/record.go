@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
 	"log/slog"
 	"math"
 	"os/exec"
@@ -319,28 +318,17 @@ func (s *Service) DeleteRecording(ctx context.Context, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	rec, err := s.metadata.GetMetadataByRecordingID(ctx, id)
-	missing := errors.Is(err, storage.ErrNotFound)
-	if err != nil && !missing {
+	if err != nil {
 		return err
 	}
 	if rec.State == "recording" || rec.State == "finalizing" || s.jobs[id] != nil {
 		return ErrConflict
 	}
-	if missing {
-		err = s.media.DeleteMediaByID(ctx, id)
-	} else {
-		err = s.media.DeleteMedia(ctx, rec.RecordingPath)
-	}
-	if errors.Is(err, fs.ErrNotExist) {
-		return storage.ErrNotFound
-	}
-	if errors.Is(err, storage.ErrMediaBusy) {
-		return ErrConflict
-	} else if err != nil {
+	if err := s.metadata.DeleteMetadata(ctx, id); err != nil {
 		return fmt.Errorf("%w: %w", ErrCleanup, err)
 	}
-	if err := s.metadata.DeleteMetadata(ctx, id); err != nil && !errors.Is(err, storage.ErrNotFound) {
-		return fmt.Errorf("%w: %w", ErrCleanup, err)
+	if err := s.media.DeleteMedia(ctx, rec.RecordingPath); err != nil {
+		slog.Error("recording media left after delete", "recording_id", id, "error", err)
 	}
 	return nil
 }

@@ -461,7 +461,7 @@ paths:
     delete:
       tags: [Recording Storage APIs]
       summary: Delete a record
-      description: Deletes media first, then deletes metadata. Media or metadata deletion failure returns 503. An active recording or extraction returns 409; retry later. Successful deletion returns 200. Deleting again, or reading a deleted record, returns 404.
+      description: Deletes metadata first, then attempts media deletion, including all derived frames and clips. Metadata deletion failure returns 503 and keeps the media. Media deletion failure or an active extraction still returns 200. Deleting again, or reading a deleted record, returns 404.
       parameters:
         - $ref: '#/components/parameters/RecordingId'
       responses:
@@ -482,7 +482,7 @@ paths:
                 error_code: recording_not_found
                 error_detail: recording not found
         '409':
-          description: Record is still recording, finalizing, or in use by an extraction.
+          description: Record is still recording or finalizing.
           content:
             application/json:
               schema:

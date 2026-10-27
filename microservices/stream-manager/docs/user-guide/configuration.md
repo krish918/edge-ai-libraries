@@ -46,24 +46,14 @@ recordings or set `RecordingRetention`.
 
 ### Cleanup schedule
 
-Cleanup runs at startup and every 24 hours while the service runs. No additional
-grace period applies after recording expiry.
+Cleanup runs at startup and every 24 hours. It deletes expired recordings and all
+their derived media, and media without recording metadata. Busy media and failed
+deletions are retried on the next run.
 
-- Cleanup deletes expired recordings and their derived frames and clips.
-- Cleanup deletes orphaned media, including frames and clips without recording metadata.
-- Cleanup skips active recordings and recordings used by frame or clip extraction.
-- Cleanup retries failed deletions on the next run.
-- Cleanup frees the storage space used by deleted recordings, frames, and clips.
-
-Recording expiry blocks new frame and clip extraction and downloads of existing
-frames and clips immediately. Media deletion can occur up to 24 hours
-later during normal operation. An active recording, extraction, or deletion failure
-can delay cleanup until a later run.
-
-Changing `RecordingRetention` does not change expiry times already assigned.
-Cleanup still processes previously expired recordings when `RecordingRetention` is
-`0`. Manual deletion removes a recording and its frames and clips without waiting
-for the schedule. If extraction is active, manual deletion returns `409`; retry later.
+Expiry blocks extraction and downloads immediately; storage is freed only after
+deletion. Changing `RecordingRetention`, including setting it to `0`, does not change
+existing expiry times. Manual deletion removes metadata immediately and attempts to
+delete all media. Busy media or failed deletions are retried by cleanup.
 
 ### Frame and clip lifetime
 
