@@ -150,7 +150,7 @@ One record is one recording of one sensor.
 | `size_bytes` | integer, nullable | Size of the finished media; `null` until `ready`. |
 | `metadata` | object | Whatever metadata the caller supplied, or `{}` if none was. |
 | `creation_ts` | string (date-time) | Record creation time. |
-| `expiry_ts` | string (date-time), nullable | When retrieval becomes unavailable. It is set when the recording becomes `ready` or `failed` and `RecordingRetention` is set. Cleanup deletes the recording and all its derived media. |
+| `expiry_ts` | string (date-time), nullable | When retrieval becomes unavailable. It is set when the recording becomes `ready` or `failed` and `RecordingRetention` is set. |
 | `error_detail` | string, nullable | A short reason. It is present when `state` is `failed`. It is also present when `state` is `ready` and the storage quota stopped the recording early. |
 
 ```json
@@ -476,7 +476,7 @@ keyframes, and `ready` records report those actual bounds.
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `stream_id` | string | yes | The attached stream to record. |
-| `start_ts` | string (date-time) | yes | The moment the event happened (T), on the source clock. Cannot be later than the newest video frame from the source. |
+| `start_ts` | string (date-time) | yes | The moment the event happened (T). Cannot be later than the newest video frame from the source. |
 | `duration` | number | no | Positive seconds to record after T. Omit for an open recording ended later with `/records/stop`. |
 | `pre_event_duration` | number | no | Seconds of history before T to keep, 0-300, default 0. Must already be in the buffer. |
 | `metadata` | object | no | Arbitrary metadata to store with the record. |
@@ -578,9 +578,8 @@ Content-Type: application/json
 
 `POST /records/stop`
 
-Stops an open recording. The stop time is the time of the newest video frame from
-the source, on the source clock. The host clock is not used. The stop time is fixed
-and does not move if the request is repeated. An already finished recording returns `200` with the current record.
+Stops an open recording. The stop time is fixed and does not move if the request is
+repeated. An already finished recording returns `200` with the current record.
 
 **Request body — `RecordStop`**
 
@@ -791,7 +790,7 @@ Content-Type: application/json
 | Status | `error_code` | Meaning |
 |---|---|---|
 | 200 | — | Record deleted. |
-| 404 | `recording_not_found` | No recording or retained frame or clip exists for this ID. |
+| 404 | `recording_not_found` | Unknown or already deleted recording. |
 | 409 | `record_not_ready` | Record is still recording, finalizing, or in use by an extraction. |
 | 503 | `storage_unavailable` | Deletion failed. Some media may already be deleted; retry later. |
 
@@ -800,7 +799,6 @@ Content-Type: application/json
 ## Retrieval APIs
 
 Extracts media from a `ready` record. Use the `Accept` header to select the response.
-There are no separate `/url` endpoints.
 
 | `Accept` | Response |
 |---|---|
@@ -962,7 +960,7 @@ X-Content-Type-Options: nosniff
 | Status | `error_code` | Meaning |
 |---|---|---|
 | 200 | — | The frame or clip bytes (`image/jpeg`, `image/png`, or `video/mp4`). |
-| 404 | `recording_not_found` / `frame_not_found` / `clip_not_found` | Unknown, expired, or deleted recording, or the frame or clip is missing. |
+| 404 | `recording_not_found` / `frame_not_found` / `clip_not_found` | Unknown recording, or the recording is past its `expiry_ts`, or the frame or clip is missing. |
 
 ---
 

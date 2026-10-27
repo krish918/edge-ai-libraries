@@ -23,7 +23,7 @@ This page lists each setting, its purpose, and its default value.
 | `StorageDir` | string | — | `~/.local/share/stream-manager` | Directory where the database and recordings are stored. |
 | `ConcurrentRecorders` | integer | count | `10` | Maximum number of recordings that can run at the same time. |
 | `RecordingStorageSize` | integer | megabytes | `10240` | Storage quota for recorded media and the frames and clips cut from it. Must be between 5120 and 1073741824. |
-| `RecordingRetention` | integer | hours | `0` | Time from completion until a recording and its derived frames and clips expire. Cleanup deletes all media for expired recordings. `0` does not set an expiry time. Must be between 0 and 360. |
+| `RecordingRetention` | integer | hours | `0` | Time after which retrieval of a finished or failed recording and its derived frames and clips becomes unavailable. `0` does not set an expiry time. Must be between 0 and 360. |
 
 ### Storage quota
 
@@ -37,9 +37,8 @@ Stream Manager counts the bytes of each recording and of its frames and clips.
   state `failed`. Stream Manager deletes its media.
 - When the quota is full, a new frame or clip request returns `507` with `storage_full`.
 
-Stream Manager does not delete unexpired recordings to make space. Delete recordings
-manually to free space immediately. Retention and cleanup free space on the cleanup
-schedule.
+Stream Manager does not delete unexpired recordings to make space. To make space, delete
+recordings or set `RecordingRetention`.
 
 > [!NOTE]
 > The quota does not include the database file. A recording can go above the quota by

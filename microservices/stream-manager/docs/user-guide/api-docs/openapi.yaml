@@ -461,7 +461,7 @@ paths:
     delete:
       tags: [Recording Storage APIs]
       summary: Delete a record
-      description: Deletes the recording and all derived media. An active recording or extraction returns 409; retry later. Successful deletion returns 200. Deleting again, or reading a deleted record, returns 404.
+      description: Deletes media first, then deletes metadata. Media or metadata deletion failure returns 503. An active recording or extraction returns 409; retry later. Successful deletion returns 200. Deleting again, or reading a deleted record, returns 404.
       parameters:
         - $ref: '#/components/parameters/RecordingId'
       responses:
@@ -472,7 +472,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Deletion'
         '404':
-          description: No recording or retained frame or clip exists for this ID.
+          description: Unknown or already deleted recording.
           content:
             application/json:
               schema:
@@ -494,7 +494,7 @@ paths:
                     error_code: record_not_ready
                     error_detail: recording cannot be changed in its current state
         '503':
-          description: Deletion failed. Some media may already be deleted; retry later.
+          description: Metadata deletion failed. The record and media remain; retry later.
           content:
             application/json:
               schema:
@@ -788,7 +788,7 @@ paths:
     get:
       tags: [Retrieval APIs]
       summary: Gets a produced frame or clip
-      description: Serves a derived frame or clip until its recording expires or is deleted. Automatic cleanup and manual deletion delete the recording and all its derived media.
+      description: Serves a derived frame or clip. Recording expiry and deleting the recording remove its derived media. expiry_ts is null when the recording has no expiry.
       parameters:
         - $ref: '#/components/parameters/RecordingId'
         - name: file
@@ -802,11 +802,11 @@ paths:
           description: The frame or clip bytes.
           headers:
             Cache-Control:
-              description: private, max-age limited to the recording's remaining lifetime. Uses private, no-cache when the recording has no expiry.
+              description: private, max-age=<seconds until expiry_ts>; private, no-cache when there is no expiry.
               schema:
                 type: string
             Expires:
-              description: The recording's expiry time in HTTP date format. Omitted when the recording has no expiry.
+              description: The recording's expiry_ts in HTTP date format. Omitted when the recording has no expiry.
               schema:
                 type: string
             X-Content-Type-Options:
@@ -827,7 +827,7 @@ paths:
                 type: string
                 format: binary
         '404':
-          description: An invalid, unknown, expired, or deleted recording returns recording_not_found. A missing frame returns frame_not_found; a missing clip returns clip_not_found.
+          description: The recording is missing or past its expiry_ts, or the frame or clip file is missing. Missing or expired recordings return recording_not_found; missing frame files return frame_not_found; missing clip files return clip_not_found.
           content:
             application/json:
               schema:
@@ -1069,7 +1069,7 @@ components:
           type: string
           format: date-time
           nullable: true
-          description: When frame and clip extraction and downloads become unavailable. It is set when the recording becomes ready or failed and the deployment sets a retention period. Cleanup deletes the recording and all its derived media.
+          description: When retrieval becomes unavailable. It is set when the recording becomes ready or failed and the deployment sets a retention period.
         error_detail:
           type: string
           nullable: true
@@ -1117,12 +1117,12 @@ components:
           description: Where the clip really ends, that instant not included; empty for a single frame.
         url:
           type: string
-          description: An origin-relative path that serves the produced file via GET /media/{recording-id}/{file}. It never points at the original recording.
+          description: An origin-relative path that serves the produced file via GET /media/{recording-id}/{file} until expiry_ts. It never points at the original recording.
         expiry_ts:
           type: string
           format: date-time
           nullable: true
-          description: The recording's expiry time. The frame or clip becomes unavailable at this time. Null means the recording has no expiry.
+          description: When url stops working based on the recording's expiry_ts. Null when the recording has no expiry.
       example:
         recording_id: rec-2
         sensor_id: cam-07
