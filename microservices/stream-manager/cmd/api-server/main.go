@@ -70,9 +70,6 @@ func run() (errResult error) {
 		return err
 	}
 	defer func() { errResult = errors.Join(errResult, recordings.Close()) }()
-	if cfg.DerivedMediaTTL != 0 {
-		slog.Warn("DerivedMediaTTL is reserved for future use; derived media expiry is disabled")
-	}
 	retrievals, err := retrieve.NewService(metadata, media)
 	if err != nil {
 		return err

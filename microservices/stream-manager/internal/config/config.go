@@ -26,7 +26,6 @@ const (
 	MaxStorageSize        = 1 << 30 // MegaBytes; 1 PiB, keeps the byte count far below int64 overflow
 	ConcurrentRecorders   = 10
 	MaxRecordingRetention = 15 * 24 * time.Hour
-	MaxDerivedMediaTTL    = 24 * time.Hour
 )
 
 type Config struct {
@@ -37,7 +36,6 @@ type Config struct {
 	ConcurrentRecorders  int
 	RecordingStorageSize int64         // Bytes allocated to recordings and derived media.
 	RecordingRetention   time.Duration // Zero keeps finished recordings until deleted.
-	DerivedMediaTTL      time.Duration // Reserved for future use; derived media does not expire.
 }
 
 // Load reads the configuration from config.json (or the file named by SM_CONFIG_FILE),
@@ -81,14 +79,6 @@ func Load() (Config, error) {
 					return Config{}, fmt.Errorf("recording retention must be between 0 and %d hours", maxRetentionHours)
 				}
 				cfg.RecordingRetention *= time.Hour
-			}
-			if hasKey(data, "DerivedMediaTTL") {
-				maxDerivedTTLMinutes := int(MaxDerivedMediaTTL / time.Minute)
-				if cfg.DerivedMediaTTL < 0 ||
-					cfg.DerivedMediaTTL > time.Duration(maxDerivedTTLMinutes) {
-					return Config{}, fmt.Errorf("derived media TTL must be 0 or between 1 and %d minutes", maxDerivedTTLMinutes)
-				}
-				cfg.DerivedMediaTTL *= time.Minute
 			}
 		}
 	} else {

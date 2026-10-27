@@ -24,7 +24,6 @@ This page lists each setting, its purpose, and its default value.
 | `ConcurrentRecorders` | integer | count | `10` | Maximum number of recordings that can run at the same time. |
 | `RecordingStorageSize` | integer | megabytes | `10240` | Storage quota for recorded media and the frames and clips cut from it. Must be between 5120 and 1073741824. |
 | `RecordingRetention` | integer | hours | `0` | Time from completion until a recording expires. Cleanup removes expired recordings but keeps existing frames and clips. `0` does not set an expiry time. Must be between 0 and 360. |
-| `DerivedMediaTTL` | integer | minutes | `0` | Reserved for future use. Valid values are 0-1440. No value currently expires or deletes derived media. A nonzero value produces a startup warning. |
 
 ### Storage quota
 
@@ -82,8 +81,7 @@ retry later.
   "StorageDir": "~/.local/share/stream-manager",
   "ConcurrentRecorders": 10,
   "RecordingStorageSize": 10240,
-  "RecordingRetention": 0,
-  "DerivedMediaTTL": 0
+  "RecordingRetention": 0
 }
 ```
 
