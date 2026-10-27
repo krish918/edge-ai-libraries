@@ -56,6 +56,13 @@ grace period applies after recording expiry.
 - Cleanup retries failed deletions on the next run.
 - Cleanup frees the storage space used by deleted recordings, frames, and clips.
 
+Each cleanup run writes one `media cleanup summary` log with its status, duration,
+`deleted_recordings`, `busy_skips`, and `failed_operations`. The deletion count
+includes orphan directories and counts only operations that complete media and
+metadata cleanup. Busy skips and failures count attempts, not unique recordings:
+the expiry and orphan passes can check the same recording in one run. Failed runs
+include the error at error level. Cancelled runs report `cancelled` at info level.
+
 Recording expiry blocks new frame and clip extraction and downloads of existing
 frames and clips immediately. Media deletion can occur up to 24 hours
 later during normal operation. An active recording, extraction, or deletion failure

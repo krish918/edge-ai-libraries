@@ -4,9 +4,12 @@
 package cleanup
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -20,6 +23,106 @@ import (
 	"github.com/open-edge-platform/edge-ai-libraries/microservices/stream-manager/internal/retrieve"
 	"github.com/open-edge-platform/edge-ai-libraries/microservices/stream-manager/internal/storage"
 )
+
+func TestSweepSummary(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		status  string
+		level   string
+		deleted int
+		busy    int
+		failed  int
+	}{
+		{name: "empty", status: "completed", level: "INFO"},
+		{name: "deletions", status: "completed", level: "INFO", deleted: 2},
+		{name: "busy", status: "completed", level: "INFO", busy: 2},
+		{name: "media failure", status: "failed", level: "ERROR", failed: 2},
+		{name: "metadata failure", status: "failed", level: "ERROR", failed: 1},
+		{name: "cancelled", status: "cancelled", level: "INFO"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newTestEnv(t)
+			ctx := context.Background()
+			now := time.Now()
+			switch tc.name {
+			case "deletions":
+				rec, _ := e.seed(t, &now)
+				e.derived(t, rec, now)
+				orphan, _ := e.seed(t, nil)
+				if err := e.metadata.DeleteMetadata(ctx, orphan.RecordingID); err != nil {
+					t.Fatal(err)
+				}
+				e.seed(t, nil)
+			case "busy":
+				rec, _ := e.seed(t, &now)
+				release, err := e.media.AcquireMedia(ctx, rec.RecordingPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer release()
+			case "media failure":
+				e.seed(t, &now)
+				e.media.deleteErr = errors.New("disk unavailable")
+			case "metadata failure":
+				e.seed(t, &now)
+				e.metadata.deleteErr = errors.New("database unavailable")
+			case "cancelled":
+				cancelled, cancel := context.WithCancel(ctx)
+				cancel()
+				ctx = cancelled
+			}
+
+			var output bytes.Buffer
+			previous := slog.Default()
+			slog.SetDefault(slog.New(slog.NewJSONHandler(&output, nil)))
+			defer slog.SetDefault(previous)
+
+			err := e.service.sweep(ctx, now)
+			if (err != nil) != (tc.failed > 0 || tc.status == "cancelled") {
+				t.Fatalf("unexpected sweep error: %v", err)
+			}
+			type logSummary struct {
+				Message  string `json:"msg"`
+				Level    string `json:"level"`
+				Status   string `json:"status"`
+				Duration *int64 `json:"duration"`
+				Deleted  int    `json:"deleted_recordings"`
+				Busy     int    `json:"busy_skips"`
+				Failed   int    `json:"failed_operations"`
+				Error    string `json:"error"`
+			}
+			var summary logSummary
+			decoder := json.NewDecoder(&output)
+			summaries := 0
+			for {
+				var entry logSummary
+				if err := decoder.Decode(&entry); errors.Is(err, io.EOF) {
+					break
+				} else if err != nil {
+					t.Fatal(err)
+				}
+				if entry.Message == "media cleanup summary" {
+					summary = entry
+					summaries++
+				}
+			}
+			if summaries != 1 {
+				t.Fatalf("expected exactly one summary log, got %d", summaries)
+			}
+			if summary.Message != "media cleanup summary" || summary.Level != tc.level ||
+				summary.Status != tc.status || summary.Deleted != tc.deleted ||
+				summary.Busy != tc.busy || summary.Failed != tc.failed {
+				t.Fatalf("unexpected summary: %+v", summary)
+			}
+			if summary.Duration == nil || *summary.Duration < 0 {
+				t.Fatalf("invalid duration: %v", summary.Duration)
+			}
+			if (summary.Error != "") != (err != nil) {
+				t.Fatalf("summary error %q does not match sweep error %v", summary.Error, err)
+			}
+		})
+	}
+}
 
 type testMedia struct {
 	*storage.MediaStore
