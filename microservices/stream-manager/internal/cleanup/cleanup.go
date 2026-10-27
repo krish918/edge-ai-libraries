@@ -70,6 +70,9 @@ func (s *Service) sweep(ctx context.Context, now time.Time) (result error) {
 		} else if result != nil {
 			level, status = slog.LevelError, "failed"
 		}
+		if stats.failed > 0 {
+			level = slog.LevelError
+		}
 		attrs := []any{
 			"status", status, "duration", time.Since(started),
 			"deleted_recordings", stats.deleted,

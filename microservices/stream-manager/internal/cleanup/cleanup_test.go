@@ -39,6 +39,7 @@ func TestSweepSummary(t *testing.T) {
 		{name: "media failure", status: "failed", level: "ERROR", failed: 2},
 		{name: "metadata failure", status: "failed", level: "ERROR", failed: 1},
 		{name: "cancelled", status: "cancelled", level: "INFO"},
+		{name: "failure then cancellation", status: "cancelled", level: "ERROR", failed: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e := newTestEnv(t)
@@ -70,6 +71,13 @@ func TestSweepSummary(t *testing.T) {
 				cancelled, cancel := context.WithCancel(ctx)
 				cancel()
 				ctx = cancelled
+			case "failure then cancellation":
+				e.seed(t, &now)
+				e.media.deleteErr = errors.New("disk unavailable")
+				cancelled, cancel := context.WithCancel(ctx)
+				defer cancel()
+				ctx = cancelled
+				e.media.beforeList = cancel
 			}
 
 			var output bytes.Buffer
@@ -120,6 +128,9 @@ func TestSweepSummary(t *testing.T) {
 			if (summary.Error != "") != (err != nil) {
 				t.Fatalf("summary error %q does not match sweep error %v", summary.Error, err)
 			}
+			if tc.name == "failure then cancellation" && !errors.Is(err, e.media.deleteErr) {
+				t.Fatalf("original failure was lost: %v", err)
+			}
 		})
 	}
 }
@@ -128,6 +139,14 @@ type testMedia struct {
 	*storage.MediaStore
 	deleteErr    error
 	beforeDelete func()
+	beforeList   func()
+}
+
+func (m *testMedia) ListMedia(ctx context.Context) (map[string]string, error) {
+	if m.beforeList != nil {
+		m.beforeList()
+	}
+	return m.MediaStore.ListMedia(ctx)
 }
 
 func (m *testMedia) DeleteMediaIfEligible(ctx context.Context, uri string, eligible func() (bool, error)) (bool, error) {
