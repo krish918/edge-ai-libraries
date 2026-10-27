@@ -39,7 +39,7 @@ Items are listed roughly in order of priority.
 - [ ] Use `errors.Join()` to combine `recordingFilter` validation errors and similar errors across endpoints
 - [ ] Evaluate whether `DecodeJSON` would be useful as middleware
 - [ ] Optimize request sequences - Should POST /streams be always called before POST /records/start by consumer?
-- [ ] Enable derived media expiry and cleanup in one change. `DerivedMediaTTL` is reserved in `config.json` but not enforced. Keep `0` (disabled) as the default. Measure each frame or clip TTL from its creation time, independent of the recording's `expiry_ts`. Expire the URL and delete the file together. Reuse the recording cleanup service and its locked eligibility check. Delete only derived media, never the recording or its metadata. Agree the default TTL with consumers first.
+- [x] Use the recording's `expiry_ts` for derived frames and clips. Remove `DerivedMediaTTL`. Block extraction and downloads at expiry. Delete expired recordings and all their derived media during cleanup. Manual recording deletion also deletes all derived media.
 - [ ] Evaluate quota-based eviction of the oldest derived media when storage is almost full. Retained derived media counts against the quota until deleted.
 - [ ] Decide whether `PUT /streams/{stream-id}/buffer` should reject resizing a stream that is in `failed` state, or whether resizing an already-failed stream's buffer should keep succeeding as it does today
 - [ ] Should recording IDs be prefixed with `rec-` as stream IDs are prefixed with `str-`?

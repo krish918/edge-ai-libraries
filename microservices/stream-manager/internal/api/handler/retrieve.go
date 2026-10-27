@@ -96,7 +96,6 @@ func (h RetrieveHandler) Clip(c *gin.Context) {
 }
 
 // Media handles GET /media/{recording-id}/{file}, serving a frame or clip
-// independently of recording expiry.
 func (h RetrieveHandler) Media(c *gin.Context) {
 	extendWriteDeadline(c)
 	name := c.Param("file")
