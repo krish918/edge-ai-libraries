@@ -15,7 +15,7 @@ import (
 
 func alwaysEligible() (bool, error) { return true, nil }
 
-func TestDeleteSourceMediaEligibility(t *testing.T) {
+func TestDeleteMediaEligibility(t *testing.T) {
 	_, media, _ := testStores(t)
 	ctx := context.Background()
 	filename, uri, release, err := media.PrepareMediaWithLease(ctx, uuid.NewString())
@@ -32,11 +32,11 @@ func TestDeleteSourceMediaEligibility(t *testing.T) {
 		}
 		return true, nil
 	}
-	if deleted, err := media.DeleteSourceMedia(ctx, uri, eligible); deleted || !errors.Is(err, ErrMediaBusy) || called {
+	if deleted, err := media.DeleteMediaIfEligible(ctx, uri, eligible); deleted || !errors.Is(err, ErrMediaBusy) || called {
 		t.Fatalf("active recording eligibility: deleted=%v error=%v checked=%v", deleted, err, called)
 	}
 	release()
-	if deleted, err := media.DeleteSourceMedia(ctx, uri, nil); deleted || err == nil {
+	if deleted, err := media.DeleteMediaIfEligible(ctx, uri, nil); deleted || err == nil {
 		t.Fatalf("missing eligibility check: deleted=%v error=%v", deleted, err)
 	}
 	lookupErr := errors.New("metadata unavailable")
@@ -50,7 +50,7 @@ func TestDeleteSourceMediaEligibility(t *testing.T) {
 		{name: "eligible", allowed: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			deleted, err := media.DeleteSourceMedia(ctx, uri, func() (bool, error) {
+			deleted, err := media.DeleteMediaIfEligible(ctx, uri, func() (bool, error) {
 				_, _ = eligible()
 				return tc.allowed, tc.err
 			})
@@ -140,7 +140,7 @@ func TestPrepareMediaLease(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer release()
-	if _, err := media.DeleteSourceMedia(ctx, uri, alwaysEligible); !errors.Is(err, ErrMediaBusy) {
+	if _, err := media.DeleteMediaIfEligible(ctx, uri, alwaysEligible); !errors.Is(err, ErrMediaBusy) {
 		t.Fatalf("new recording directory was not protected: %v", err)
 	}
 	if err := os.WriteFile(filename, []byte("source"), 0o600); err != nil {
@@ -154,7 +154,7 @@ func TestPrepareMediaLease(t *testing.T) {
 	}
 	release()
 	release()
-	if _, err := media.DeleteSourceMedia(ctx, uri, alwaysEligible); err != nil {
+	if _, err := media.DeleteMediaIfEligible(ctx, uri, alwaysEligible); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Dir(filename)); !errors.Is(err, os.ErrNotExist) {

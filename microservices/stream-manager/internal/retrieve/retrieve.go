@@ -139,6 +139,7 @@ func (s *Service) Frame(ctx context.Context, id string, ts time.Time, format, ma
 		Result: model.MediaResult{
 			RecordingID: rec.RecordingID, SensorID: rec.SensorID,
 			RequestedStartTS: ts.UTC(), StartTS: frameTS.UTC(),
+			ExpiryTS: rec.ExpiryTS,
 		},
 		Name: name, Path: path, ExactMatch: exact,
 	}, nil
@@ -187,13 +188,18 @@ func (s *Service) Clip(ctx context.Context, id string, start time.Time, duration
 			RecordingID: rec.RecordingID, SensorID: rec.SensorID,
 			RequestedStartTS: start.UTC(), RequestedEndTS: &requestedEnd,
 			StartTS: clipStart.UTC(), EndTS: &clipEnd,
+			ExpiryTS: rec.ExpiryTS,
 		},
 		Name: name, Path: path, ExactMatch: clipStart.Equal(start),
 	}, nil
 }
 
-// OpenMedia serves retained derived media independently of recording expiry.
+// OpenMedia serves derived media until its recording expires or is deleted.
 func (s *Service) OpenMedia(ctx context.Context, id, name string) (*os.File, MediaFile, error) {
+	rec, err := s.recording(ctx, id)
+	if err != nil {
+		return nil, MediaFile{}, err
+	}
 	file, err := s.media.OpenDerivedByID(ctx, id, name)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, MediaFile{}, ErrMediaNotFound
@@ -202,7 +208,7 @@ func (s *Service) OpenMedia(ctx context.Context, id, name string) (*os.File, Med
 		return nil, MediaFile{}, err
 	}
 	contentType := contentTypes[filepath.Ext(name)[1:]]
-	return file, MediaFile{ContentType: contentType}, nil
+	return file, MediaFile{ContentType: contentType, ExpiryTS: rec.ExpiryTS}, nil
 }
 
 // recording returns a recording that has not expired.

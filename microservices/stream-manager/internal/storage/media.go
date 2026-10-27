@@ -31,7 +31,7 @@ type MediaHandler interface {
 	OpenMedia(ctx context.Context, uri string) (string, error)
 	DeleteMedia(ctx context.Context, uri string) error
 	DeleteMediaByID(ctx context.Context, recordingID string) error
-	DeleteSourceMedia(ctx context.Context, uri string, eligible func() (bool, error)) (bool, error)
+	DeleteMediaIfEligible(ctx context.Context, uri string, eligible func() (bool, error)) (bool, error)
 	PutDerived(ctx context.Context, uri, name string, write func(path string) error) (string, time.Time, error)
 	OpenDerived(ctx context.Context, uri, name string) (*os.File, error)
 	OpenDerivedByID(ctx context.Context, recordingID, name string) (*os.File, error)
@@ -219,8 +219,7 @@ func (s *MediaStore) UsedBytes() int64 {
 // Derived media names carry offsets in nanoseconds from the recording start.
 var derivedName = regexp.MustCompile(`^(frame-[0-9]+\.(jpeg|png)|clip-[0-9]+-[0-9]+\.mp4)$`)
 
-// ListMedia maps source media and empty orphan directories to their media URIs.
-// Directories containing only derived media are retained.
+// ListMedia maps recording directories, including derived-only orphans, to their media URIs.
 func (s *MediaStore) ListMedia(ctx context.Context) (map[string]string, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -235,17 +234,9 @@ func (s *MediaStore) ListMedia(ctx context.Context) (map[string]string, error) {
 			continue
 		}
 		info, err := s.root.Lstat(filepath.Join(entry.Name(), "media.ts"))
-		if errors.Is(err, fs.ErrNotExist) {
-			derived, derivedErr := fs.ReadDir(s.root.FS(), filepath.Join(entry.Name(), derivedDir))
-			if derivedErr == nil && len(derived) > 0 {
-				continue
-			}
-			if derivedErr != nil && !errors.Is(derivedErr, fs.ErrNotExist) {
-				return nil, derivedErr
-			}
-		} else if err != nil {
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return nil, err
-		} else if !info.Mode().IsRegular() {
+		} else if err == nil && !info.Mode().IsRegular() {
 			return nil, errors.New("recording media is not a regular file")
 		}
 		path := filepath.Join(s.root.Name(), entry.Name(), "media.ts")
@@ -396,6 +387,11 @@ func (s *MediaStore) DeleteMediaByID(ctx context.Context, dir string) error {
 	}
 	s.deleting[dir] = true
 	s.mu.Unlock()
+	return s.removeMediaDirectory(dir)
+}
+
+// removeMediaDirectory completes a deletion reserved under the lease mutex.
+func (s *MediaStore) removeMediaDirectory(dir string) error {
 	removeErr := s.root.RemoveAll(dir)
 	if errors.Is(removeErr, os.ErrNotExist) {
 		removeErr = nil
@@ -416,15 +412,15 @@ func (s *MediaStore) DeleteMediaByID(ctx context.Context, dir string) error {
 	return removeErr
 }
 
-// DeleteSourceMedia removes a recording while retaining all derived files.
+// DeleteMediaIfEligible removes a recording and all derived files if eligible.
 // It checks eligibility under the lease mutex before reserving deletion.
 // eligible must not call back into the media store.
-func (s *MediaStore) DeleteSourceMedia(ctx context.Context, uri string, eligible func() (bool, error)) (bool, error) {
+func (s *MediaStore) DeleteMediaIfEligible(ctx context.Context, uri string, eligible func() (bool, error)) (bool, error) {
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
 	if eligible == nil {
-		return false, errors.New("source media deletion requires an eligibility check")
+		return false, errors.New("media deletion requires an eligibility check")
 	}
 	relative, err := s.relativeMedia(uri)
 	if err != nil {
@@ -443,41 +439,8 @@ func (s *MediaStore) DeleteSourceMedia(ctx context.Context, uri string, eligible
 	}
 	s.deleting[dir] = true
 	s.mu.Unlock()
-	removeErr := s.root.Remove(relative)
-	if errors.Is(removeErr, fs.ErrNotExist) {
-		removeErr = nil
-	}
-	if removeErr == nil {
-		derivedPath := filepath.Join(dir, derivedDir)
-		derived, err := fs.ReadDir(s.root.FS(), derivedPath)
-		if errors.Is(err, fs.ErrNotExist) {
-			removeErr = s.root.Remove(dir)
-		} else if err != nil {
-			removeErr = err
-		} else if len(derived) == 0 {
-			removeErr = s.root.Remove(derivedPath)
-			if removeErr == nil || errors.Is(removeErr, fs.ErrNotExist) {
-				removeErr = s.root.Remove(dir)
-			}
-		}
-	}
-	if errors.Is(removeErr, fs.ErrNotExist) {
-		removeErr = nil
-	}
-	remaining, sizeErr := s.dirSize(dir)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.deleting, dir)
-	if sizeErr != nil {
-		return false, errors.Join(removeErr, sizeErr)
-	}
-	s.used += remaining - s.usage[dir]
-	if remaining == 0 {
-		delete(s.usage, dir)
-	} else {
-		s.usage[dir] = remaining
-	}
-	return removeErr == nil, removeErr
+	err = s.removeMediaDirectory(dir)
+	return err == nil, err
 }
 
 // relativeDerived returns the directory, relative to the root, that holds the

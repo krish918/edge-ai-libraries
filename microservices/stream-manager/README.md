@@ -8,7 +8,7 @@ keeps a rolling buffer of each stream, and records video on request. It also ret
 frames from a recording for a given time range.
 
 Optional recording retention expires recordings. Cleanup runs at startup and every
-24 hours, without deleting derived frames or clips. See
+24 hours and deletes expired recordings and their derived frames and clips. See
 [Configuration](docs/user-guide/configuration.md) for retention settings.
 
 ## Quick Start

@@ -23,7 +23,7 @@ This page lists each setting, its purpose, and its default value.
 | `StorageDir` | string | — | `~/.local/share/stream-manager` | Directory where the database and recordings are stored. |
 | `ConcurrentRecorders` | integer | count | `10` | Maximum number of recordings that can run at the same time. |
 | `RecordingStorageSize` | integer | megabytes | `10240` | Storage quota for recorded media and the frames and clips cut from it. Must be between 5120 and 1073741824. |
-| `RecordingRetention` | integer | hours | `0` | Time from completion until a recording expires. Cleanup removes expired recordings but keeps existing frames and clips. `0` does not set an expiry time. Must be between 0 and 360. |
+| `RecordingRetention` | integer | hours | `0` | Time from completion until a recording and its derived frames and clips expire. Cleanup deletes all media for expired recordings. `0` does not set an expiry time. Must be between 0 and 360. |
 
 ### Storage quota
 
@@ -50,27 +50,29 @@ schedule.
 Cleanup runs at startup and every 24 hours while the service runs. No additional
 grace period applies after recording expiry.
 
-- Cleanup removes expired recordings.
-- Cleanup keeps existing frames, clips, and their URLs.
+- Cleanup deletes expired recordings and their derived frames and clips.
+- Cleanup deletes orphaned media, including frames and clips without recording metadata.
 - Cleanup skips active recordings and recordings used by frame or clip extraction.
 - Cleanup retries failed deletions on the next run.
-- Cleanup frees the storage space used by deleted recordings.
+- Cleanup frees the storage space used by deleted recordings, frames, and clips.
 
-Recording expiry blocks new frame and clip extraction immediately. It does not block
-downloads of existing derived media. Recording deletion can occur up to 24 hours
+Recording expiry blocks new frame and clip extraction and downloads of existing
+frames and clips immediately. Media deletion can occur up to 24 hours
 later during normal operation. An active recording, extraction, or deletion failure
 can delay cleanup until a later run.
 
 Changing `RecordingRetention` does not change expiry times already assigned.
 Cleanup still processes previously expired recordings when `RecordingRetention` is
 `0`. Manual deletion removes a recording and its frames and clips without waiting
-for the schedule. Use the original recording ID to delete retained frames and clips,
-even after automatic cleanup. If extraction is active, manual deletion returns `409`;
-retry later.
+for the schedule. If extraction is active, manual deletion returns `409`; retry later.
 
-> [!NOTE]
-> Retained derived media continues to count toward the storage quota. Automatic
-> recording cleanup does not reclaim those bytes.
+### Frame and clip lifetime
+
+Frames and clips use the recording's expiry time. They have no separate TTL.
+Media responses report this time as `expiry_ts`. Downloads return `404` after expiry
+or recording deletion. If the recording has no expiry, `expiry_ts` is `null`.
+Frames and clips count toward the storage quota until cleanup or manual deletion
+deletes their files.
 
 ## Example
 

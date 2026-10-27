@@ -27,14 +27,14 @@ type testMedia struct {
 	beforeDelete func()
 }
 
-func (m *testMedia) DeleteSourceMedia(ctx context.Context, uri string, eligible func() (bool, error)) (bool, error) {
+func (m *testMedia) DeleteMediaIfEligible(ctx context.Context, uri string, eligible func() (bool, error)) (bool, error) {
 	if m.beforeDelete != nil {
 		m.beforeDelete()
 	}
 	if m.deleteErr != nil {
 		return false, m.deleteErr
 	}
-	return m.MediaStore.DeleteSourceMedia(ctx, uri, eligible)
+	return m.MediaStore.DeleteMediaIfEligible(ctx, uri, eligible)
 }
 
 type testMetadata struct {
@@ -188,13 +188,16 @@ func TestCleanupProtectsRecordingCreation(t *testing.T) {
 	}
 }
 
-func TestRetainedDerivedSurvivesRestart(t *testing.T) {
+func TestLegacyDerivedOrphanRemovedAfterRestart(t *testing.T) {
 	ctx := context.Background()
 	e := newTestEnv(t)
 	now := time.Now()
-	rec, filename := e.seed(t, &now)
+	rec, filename := e.seed(t, nil)
 	e.derived(t, rec, now.Add(-48*time.Hour))
-	if err := e.service.sweep(ctx, now); err != nil {
+	if err := os.Remove(filename); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.metadata.DeleteMetadata(ctx, rec.RecordingID); err != nil {
 		t.Fatal(err)
 	}
 	if err := errors.Join(e.media.Close(), e.metadata.Close()); err != nil {
@@ -219,9 +222,11 @@ func TestRetainedDerivedSurvivesRestart(t *testing.T) {
 	if err := reopened.service.sweep(ctx, now.Add(30*24*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	reopened.assertDerivedAvailable(t, rec.RecordingID)
-	if got := media.UsedBytes(); got != int64(len("derived")) {
-		t.Fatalf("retained derived quota was lost on restart: %d", got)
+	if _, err := os.Stat(filepath.Dir(filename)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("legacy derived-only orphan remained: %v", err)
+	}
+	if got := media.UsedBytes(); got != 0 {
+		t.Fatalf("legacy derived quota was not reclaimed: %d", got)
 	}
 }
 
@@ -295,24 +300,28 @@ func TestCleanupExpiryAndQuota(t *testing.T) {
 		if _, err := e.media.OpenMedia(ctx, rec.RecordingPath); !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("expired source remained: %v", err)
 		}
-		e.assertDerivedAvailable(t, rec.RecordingID)
+		if _, err := e.media.OpenDerived(ctx, rec.RecordingPath, "frame-0.png"); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("expired derived media remained: %v", err)
+		}
 	}
-	for _, path := range []string{keptFile, foreverFile, freshDerived, staleDerived, filepath.Dir(orphanFile)} {
+	for _, path := range []string{keptFile, foreverFile, freshDerived, staleDerived} {
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("unexpired media removed: %s: %v", path, err)
 		}
 	}
-	e.assertDerivedAvailable(t, orphan.RecordingID)
-	wantUsage := 2*int64(len("source")) + int64(len(expired)+3)*int64(len("derived"))
+	if _, err := os.Stat(filepath.Dir(orphanFile)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("orphan directory remained: %v", err)
+	}
+	wantUsage := 2 * int64(len("source")+len("derived"))
 	if got := e.media.UsedBytes(); got != wantUsage {
-		t.Fatalf("source quota not reclaimed or derived quota lost: got %d, want %d", got, wantUsage)
+		t.Fatalf("expired and orphan quota not reclaimed: got %d, want %d", got, wantUsage)
 	}
 	if err := e.service.sweep(ctx, now.Add(7*24*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	e.assertDerivedAvailable(t, orphan.RecordingID)
-	for _, rec := range expired {
-		e.assertDerivedAvailable(t, rec.RecordingID)
+	e.assertDerivedAvailable(t, forever.RecordingID)
+	if got := e.media.UsedBytes(); got != int64(len("source")+len("derived")) {
+		t.Fatalf("unexpired quota changed: %d", got)
 	}
 }
 
@@ -362,8 +371,8 @@ func TestCleanupRetries(t *testing.T) {
 	if _, err := os.Stat(filename); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expired source remained: %v", err)
 	}
-	if _, err := os.Stat(derived); err != nil {
-		t.Fatalf("record expiry removed derived media: %v", err)
+	if _, err := os.Stat(derived); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expired derived media remained: %v", err)
 	}
 	if _, err := os.Stat(keptDerived); err != nil {
 		t.Fatalf("old derived media was removed: %v", err)

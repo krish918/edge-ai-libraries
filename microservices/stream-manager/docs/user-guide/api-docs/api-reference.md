@@ -150,7 +150,7 @@ One record is one recording of one sensor.
 | `size_bytes` | integer, nullable | Size of the finished media; `null` until `ready`. |
 | `metadata` | object | Whatever metadata the caller supplied, or `{}` if none was. |
 | `creation_ts` | string (date-time) | Record creation time. |
-| `expiry_ts` | string (date-time), nullable | When new frame and clip extraction becomes unavailable. It is set when the recording becomes `ready` or `failed` and `RecordingRetention` is set. Existing derived media remains available. |
+| `expiry_ts` | string (date-time), nullable | When frame and clip extraction and downloads become unavailable. It is set when the recording becomes `ready` or `failed` and `RecordingRetention` is set. Cleanup deletes the recording and all its derived media. |
 | `error_detail` | string, nullable | A short reason. It is present when `state` is `failed`. It is also present when `state` is `ready` and the storage quota stopped the recording early. |
 
 ```json
@@ -183,7 +183,7 @@ media.
 | `start_ts` | string (date-time) | Real time of the returned frame, or first frame of the clip. |
 | `end_ts` | string (date-time), nullable | Where the clip really ends (exclusive); `null` for a single frame. |
 | `url` | string | Origin-relative path that serves the file via [`GET /media/{recording-id}/{file}`](#get-produced-media). Never points at the original recording. |
-| `expiry_ts` | string (date-time), nullable | Reserved for future use. Currently `null`; derived media does not expire automatically. |
+| `expiry_ts` | string (date-time), nullable | The recording's expiry time. The frame or clip becomes unavailable at this time. `null` means the recording has no expiry. |
 
 ### Deletion
 
@@ -772,7 +772,6 @@ Content-Type: application/json
 
 Deletes the recording and all its derived media. An active recording or extraction
 returns `409`; retry later. Successful deletion returns `200`.
-Use the original recording ID to delete retained frames and clips after automatic cleanup.
 Deleting again, or reading the deleted recording, returns `404`.
 
 ```bash
@@ -933,8 +932,9 @@ curl -i "http://localhost:8080/v1/retrieve/rec-2/clip?start_ts=2026-09-16T09:12:
 
 `GET /media/{recording-id}/{file}`
 
-Serves a derived frame or clip. Recording expiry and automatic cleanup do not affect
-this URL. Explicit manual deletion of the recording removes its derived media. See [Configuration](../configuration.md#frame-and-clip-lifetime).
+Serves a derived frame or clip until its recording expires or is deleted.
+Automatic cleanup and manual deletion delete the recording and all its derived media.
+See [Configuration](../configuration.md#frame-and-clip-lifetime).
 
 | Parameter | In | Type | Required | Description |
 |---|---|---|---|---|
@@ -956,7 +956,7 @@ X-Content-Type-Options: nosniff
 | Status | `error_code` | Meaning |
 |---|---|---|
 | 200 | — | The frame or clip bytes (`image/jpeg`, `image/png`, or `video/mp4`). |
-| 404 | `recording_not_found` / `frame_not_found` / `clip_not_found` | Invalid recording identifier, or the frame or clip file does not exist. |
+| 404 | `recording_not_found` / `frame_not_found` / `clip_not_found` | The recording is unknown, expired, or deleted, or the frame or clip file does not exist. |
 
 ---
 

@@ -232,7 +232,7 @@ func TestStreamRoutes(t *testing.T) {
 		statusResult.BuildNumber != "NA" || statusResult.BuildDate != "NA" {
 		t.Fatalf("unexpected status response: %s %v", status.Body, err)
 	}
-	{
+	for _, automatic := range []bool{false, true} {
 		ctx := t.Context()
 		id := uuid.NewString()
 		filename, uri, err := media.PrepareMedia(ctx, id)
@@ -251,15 +251,44 @@ func TestStreamRoutes(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		expiry := time.Now().Add(-time.Hour)
-		_, err = metadata.CreateMetadata(ctx, model.Recording{
+		completed := time.Now()
+		expiry := completed.Add(time.Hour)
+		rec, err := metadata.CreateMetadata(ctx, model.Recording{
 			RecordingID: id, SensorID: "cleanup-test", RecordingPath: uri,
-			State: "ready", StartTS: expiry.Add(-time.Minute), EndTS: &expiry,
-			CreationTS: expiry, ExpiryTS: &expiry,
+			State: "ready", StartTS: completed.Add(-time.Minute), EndTS: &completed,
+			CreationTS: completed, ExpiryTS: &expiry,
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
+		recordPath := "/v1/records/" + id
+		mediaPath := "/v1/media/" + id + "/frame-0.png"
+		if response := request("GET", mediaPath, "", 200); response.Body.String() != "derived" ||
+			response.Header().Get("Expires") != expiry.UTC().Format(http.TimeFormat) {
+			t.Fatalf("unexpected derived media response: %s %v", response.Body, response.Header())
+		}
+		if !automatic {
+			release, err := media.AcquireMedia(ctx, uri)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request("DELETE", recordPath, "", 409)
+			release()
+			request("DELETE", recordPath, "", 200)
+			request("GET", recordPath, "", 404)
+			request("GET", mediaPath, "", 404)
+			request("DELETE", recordPath, "", 404)
+			if got := media.UsedBytes(); got != 0 {
+				t.Fatalf("manual deletion did not reclaim quota: %d", got)
+			}
+			continue
+		}
+		expiry = time.Now().Add(-time.Hour)
+		rec.ExpiryTS = &expiry
+		if _, err := metadata.UpdateMetadata(ctx, id, rec); err != nil {
+			t.Fatal(err)
+		}
+		request("GET", mediaPath, "", 404)
 		cleaner := cleanup.NewService(metadata, media)
 		t.Cleanup(func() { _ = cleaner.Close() })
 		deadline := time.Now().Add(5 * time.Second)
@@ -276,27 +305,14 @@ func TestStreamRoutes(t *testing.T) {
 		if err := cleaner.Close(); err != nil {
 			t.Fatal(err)
 		}
-		recordPath := "/v1/records/" + id
-		mediaPath := "/v1/media/" + id + "/frame-0.png"
 		request("GET", recordPath, "", 404)
-		if response := request("GET", mediaPath, "", 200); response.Body.String() != "derived" {
-			t.Fatalf("retained media changed: %s", response.Body)
-		}
-		if got := media.UsedBytes(); got != int64(len("derived")) {
-			t.Fatalf("unexpected retained quota: %d", got)
-		}
-		release, err := media.AcquireMedia(ctx, uri)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer release()
-		request("DELETE", recordPath, "", 409)
-		release()
-		request("DELETE", recordPath, "", 200)
 		request("GET", mediaPath, "", 404)
 		request("DELETE", recordPath, "", 404)
 		if got := media.UsedBytes(); got != 0 {
-			t.Fatalf("manual deletion did not reclaim quota: %d", got)
+			t.Fatalf("automatic deletion did not reclaim quota: %d", got)
+		}
+		if _, err := os.Stat(filepath.Dir(filename)); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("automatic deletion left media directory: %v", err)
 		}
 	}
 }

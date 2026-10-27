@@ -435,28 +435,35 @@ func TestDerivedMediaDoesNotExpire(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if expiringMedia.Result.ExpiryTS != nil {
-		t.Fatalf("expiry %v, want no derived expiry", expiringMedia.Result.ExpiryTS)
+	if expiringMedia.Result.ExpiryTS == nil || !expiringMedia.Result.ExpiryTS.Equal(recordExpiry) {
+		t.Fatalf("expiry %v, want recording expiry %v", expiringMedia.Result.ExpiryTS, recordExpiry)
 	}
-	env.svc.now = func() time.Time { return recordExpiry }
-	file, _, err = env.svc.OpenMedia(ctx, expiringRecording.RecordingID, expiringMedia.Name)
+	file, info, err = env.svc.OpenMedia(ctx, expiringRecording.RecordingID, expiringMedia.Name)
 	if err != nil {
-		t.Fatalf("recording expiry blocked derived media: %v", err)
+		t.Fatal(err)
 	}
 	_ = file.Close()
+	if info.ExpiryTS == nil || !info.ExpiryTS.Equal(recordExpiry) {
+		t.Fatalf("download expiry %v, want recording expiry %v", info.ExpiryTS, recordExpiry)
+	}
+	env.svc.now = func() time.Time { return recordExpiry }
+	if _, _, err := env.svc.OpenMedia(ctx, expiringRecording.RecordingID, expiringMedia.Name); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expired frame download: got %v, want ErrNotFound", err)
+	}
+	if _, err := env.svc.Frame(ctx, expiringRecording.RecordingID, frameTS(30), "jpeg", "nearest"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expired frame extraction: got %v, want ErrNotFound", err)
+	}
 	if err := env.metadataStore.DeleteMetadata(ctx, expiringRecording.RecordingID); err != nil {
 		t.Fatal(err)
 	}
-	file, _, err = env.svc.OpenMedia(ctx, expiringRecording.RecordingID, expiringMedia.Name)
-	if err != nil {
-		t.Fatalf("missing recording metadata blocked derived media: %v", err)
+	if _, _, err := env.svc.OpenMedia(ctx, expiringRecording.RecordingID, expiringMedia.Name); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("orphan frame download: got %v, want ErrNotFound", err)
 	}
-	_ = file.Close()
 }
 
 func TestDerivedCacheRetained(t *testing.T) {
 	env := newEnv(t, 0)
-	rec := env.addRecording(t)
+	rec := env.addRecording(t, func(r *model.Recording) { r.ExpiryTS = nil })
 	ctx := context.Background()
 
 	first, err := env.svc.Frame(ctx, rec.RecordingID, frameTS(30), "jpeg", "nearest")
@@ -515,7 +522,7 @@ func TestDerivedCacheRetained(t *testing.T) {
 	}
 }
 
-func TestRecordingExpiryPreservesDerivedMedia(t *testing.T) {
+func TestRecordingExpiryBlocksDerivedMedia(t *testing.T) {
 	env := newEnv(t, 0)
 	soon := time.Now().Add(2 * time.Minute).UTC()
 	rec := env.addRecording(t, func(r *model.Recording) { r.ExpiryTS = &soon })
@@ -525,41 +532,39 @@ func TestRecordingExpiryPreservesDerivedMedia(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if media.Result.ExpiryTS != nil {
-		t.Fatalf("expiry %v, want null", media.Result.ExpiryTS)
+	if media.Result.ExpiryTS == nil || !media.Result.ExpiryTS.Equal(soon) {
+		t.Fatalf("expiry %v, want recording expiry %v", media.Result.ExpiryTS, soon)
 	}
 	file, info, err := env.svc.OpenMedia(ctx, rec.RecordingID, media.Name)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if body, _ := io.ReadAll(file); len(body) == 0 || info.ContentType != "video/mp4" ||
-		info.ExpiryTS != nil {
+		info.ExpiryTS == nil || !info.ExpiryTS.Equal(soon) {
 		t.Fatalf("unexpected media %+v (%d bytes)", info, len(body))
 	}
 	_ = file.Close()
 
-	// Recording expiry blocks new extraction, not existing derived URLs.
 	env.svc.now = func() time.Time { return soon }
-	file, _, err = env.svc.OpenMedia(ctx, rec.RecordingID, media.Name)
-	if err != nil {
-		t.Fatalf("recording expiry blocked derived media: %v", err)
+	if _, _, err := env.svc.OpenMedia(ctx, rec.RecordingID, media.Name); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expired clip download: got %v, want ErrNotFound", err)
 	}
-	_ = file.Close()
 	if _, err := env.svc.Clip(ctx, rec.RecordingID, fixtureStart, time.Second, "mp4"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("got %v, want ErrNotFound", err)
 	}
 	deleteAlways := func() (bool, error) { return true, nil }
-	if _, err := env.mediaStore.DeleteSourceMedia(ctx, rec.RecordingPath, deleteAlways); err != nil {
+	if _, err := env.mediaStore.DeleteMediaIfEligible(ctx, rec.RecordingPath, deleteAlways); err != nil {
 		t.Fatal(err)
 	}
 	if err := env.metadataStore.DeleteMetadata(ctx, rec.RecordingID); err != nil {
 		t.Fatal(err)
 	}
-	file, _, err = env.svc.OpenMedia(ctx, rec.RecordingID, media.Name)
-	if err != nil {
-		t.Fatalf("recording cleanup blocked derived media: %v", err)
+	if _, _, err := env.svc.OpenMedia(ctx, rec.RecordingID, media.Name); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("deleted clip download: got %v, want ErrNotFound", err)
 	}
-	_ = file.Close()
+	if _, err := os.Stat(media.Path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("deleted clip file remained: %v", err)
+	}
 }
 
 func TestDeleteMediaRemovesDerived(t *testing.T) {
