@@ -23,6 +23,8 @@ func TestRecordErrors(t *testing.T) {
 	}{
 		{storage.ErrStorageFull, http.StatusInsufficientStorage, "storage_full"},
 		{record.ErrCapacity, http.StatusTooManyRequests, "capacity_exhausted"},
+		{record.ErrConflict, http.StatusConflict, "record_not_ready"},
+		{record.ErrCleanup, http.StatusServiceUnavailable, "storage_unavailable"},
 	}
 	for _, tc := range cases {
 		rec := httptest.NewRecorder()

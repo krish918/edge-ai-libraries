@@ -33,6 +33,8 @@ func ffmpegArgs(source string) []string {
 		"-hide_banner", "-loglevel", "error", "-nostdin", "-n",
 		"-rtsp_transport", "tcp", "-allowed_media_types", "video", "-i", source,
 		"-map", "0:v:0", "-an", "-c:v", "copy", "-copyts",
+		// Preserve source RTP ticks instead of rounding to the frame-rate time base.
+		"-copytb", "1",
 		// The relay's first keyframe is exactly PTS 0. FFmpeg may discard that
 		// first PTS while deriving B-frame DTS; restore only this known value.
 		"-bsf:v", "setts=pts=PTS*not(not(N)),dump_extra=freq=keyframe",

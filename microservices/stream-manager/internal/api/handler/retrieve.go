@@ -96,7 +96,6 @@ func (h RetrieveHandler) Clip(c *gin.Context) {
 }
 
 // Media handles GET /media/{recording-id}/{file}, serving a frame or clip
-// until its expiry_ts.
 func (h RetrieveHandler) Media(c *gin.Context) {
 	extendWriteDeadline(c)
 	name := c.Param("file")
@@ -218,7 +217,7 @@ func writeRetrieveError(c *gin.Context, err error, clip bool) {
 		}
 		common.WriteError(c, http.StatusNotFound, notFoundCode, detail)
 	case errors.Is(err, retrieve.ErrMediaNotFound):
-		common.WriteError(c, http.StatusNotFound, notFoundCode, "media not found or expired")
+		common.WriteError(c, http.StatusNotFound, notFoundCode, "media not found")
 	case errors.Is(err, retrieve.ErrNotReady):
 		common.WriteError(c, http.StatusConflict, "record_not_ready", "record is not ready")
 	case errors.Is(err, retrieve.ErrBusy):

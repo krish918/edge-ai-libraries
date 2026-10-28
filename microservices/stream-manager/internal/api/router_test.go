@@ -5,6 +5,7 @@ package api_test
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -14,8 +15,11 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/open-edge-platform/edge-ai-libraries/microservices/stream-manager/internal/api"
+	"github.com/open-edge-platform/edge-ai-libraries/microservices/stream-manager/internal/cleanup"
 	"github.com/open-edge-platform/edge-ai-libraries/microservices/stream-manager/internal/config"
+	"github.com/open-edge-platform/edge-ai-libraries/microservices/stream-manager/internal/model"
 	"github.com/open-edge-platform/edge-ai-libraries/microservices/stream-manager/internal/record"
 	"github.com/open-edge-platform/edge-ai-libraries/microservices/stream-manager/internal/retrieve"
 	"github.com/open-edge-platform/edge-ai-libraries/microservices/stream-manager/internal/storage"
@@ -70,7 +74,7 @@ func TestStreamRoutes(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	retrievals, err := retrieve.NewService(metadata, media, 15*time.Minute)
+	retrievals, err := retrieve.NewService(metadata, media)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,5 +231,82 @@ func TestStreamRoutes(t *testing.T) {
 		statusResult.Status != "ok" || statusResult.Version != "v0.0.1-test" ||
 		statusResult.BuildNumber != "NA" || statusResult.BuildDate != "NA" {
 		t.Fatalf("unexpected status response: %s %v", status.Body, err)
+	}
+	for _, automatic := range []bool{false, true} {
+		ctx := t.Context()
+		id := uuid.NewString()
+		filename, uri, err := media.PrepareMedia(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filename, []byte("source"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := media.PutMedia(ctx, uri); err != nil {
+			t.Fatal(err)
+		}
+		_, _, err = media.PutDerived(ctx, uri, "frame-0.png", func(path string) error {
+			return os.WriteFile(path, []byte("derived"), 0o600)
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		completed := time.Now()
+		expiry := completed.Add(time.Hour)
+		rec, err := metadata.CreateMetadata(ctx, model.Recording{
+			RecordingID: id, SensorID: "cleanup-test", RecordingPath: uri,
+			State: "ready", StartTS: completed.Add(-time.Minute), EndTS: &completed,
+			CreationTS: completed, ExpiryTS: &expiry,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		recordPath := "/v1/records/" + id
+		mediaPath := "/v1/media/" + id + "/frame-0.png"
+		if response := request("GET", mediaPath, "", 200); response.Body.String() != "derived" ||
+			response.Header().Get("Expires") != expiry.UTC().Format(http.TimeFormat) {
+			t.Fatalf("unexpected derived media response: %s %v", response.Body, response.Header())
+		}
+		if !automatic {
+			request("DELETE", recordPath, "", 200)
+			request("GET", recordPath, "", 404)
+			request("GET", mediaPath, "", 404)
+			request("DELETE", recordPath, "", 404)
+			if got := media.UsedBytes(); got != 0 {
+				t.Fatalf("manual deletion did not reclaim quota: %d", got)
+			}
+			continue
+		}
+		expiry = time.Now().Add(-time.Hour)
+		rec.ExpiryTS = &expiry
+		if _, err := metadata.UpdateMetadata(ctx, id, rec); err != nil {
+			t.Fatal(err)
+		}
+		request("GET", mediaPath, "", 404)
+		cleaner := cleanup.NewService(metadata, media)
+		t.Cleanup(func() { _ = cleaner.Close() })
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			_, err := metadata.GetMetadataByRecordingID(ctx, id)
+			if errors.Is(err, storage.ErrNotFound) {
+				break
+			}
+			if err != nil || time.Now().After(deadline) {
+				t.Fatalf("cleanup did not finish: %v", err)
+			}
+			time.Sleep(time.Millisecond)
+		}
+		if err := cleaner.Close(); err != nil {
+			t.Fatal(err)
+		}
+		request("GET", recordPath, "", 404)
+		request("GET", mediaPath, "", 404)
+		request("DELETE", recordPath, "", 404)
+		if got := media.UsedBytes(); got != 0 {
+			t.Fatalf("automatic deletion did not reclaim quota: %d", got)
+		}
+		if _, err := os.Stat(filepath.Dir(filename)); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("automatic deletion left media directory: %v", err)
+		}
 	}
 }

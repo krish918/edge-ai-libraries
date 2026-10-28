@@ -112,7 +112,6 @@ func TestDeleteOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
 	t.Cleanup(func() { _ = metadata.Close() })
 	media, err := storage.OpenMediaStore(dir, 0)
 	if err != nil {
@@ -165,6 +164,9 @@ func TestDeleteOrder(t *testing.T) {
 	if _, err := os.Stat(filename); err != nil {
 		t.Fatalf("media removed before metadata: %v", err)
 	}
+	if _, err := metadata.GetMetadataByRecordingID(ctx, rec.RecordingID); err != nil {
+		t.Fatalf("metadata must remain for retry: %v", err)
+	}
 	svc.metadata = metadata
 	if err := svc.DeleteRecording(ctx, rec.RecordingID); err != nil {
 		t.Fatalf("retry after metadata failure: %v", err)
@@ -179,5 +181,16 @@ func TestDeleteOrder(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Dir(filename)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("media kept: %v", err)
+	}
+
+	rec, filename = seed(t, metadata, media, "ready")
+	if err := metadata.DeleteMetadata(ctx, rec.RecordingID); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.DeleteRecording(ctx, rec.RecordingID); !errors.Is(err, storage.ErrNotFound) {
+		t.Fatalf("missing metadata should report not found: %v", err)
+	}
+	if _, err := os.Stat(filename); err != nil {
+		t.Fatalf("media without metadata should remain for cleanup: %v", err)
 	}
 }

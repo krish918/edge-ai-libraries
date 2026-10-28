@@ -218,9 +218,6 @@ func TestLoadRecordingStorageLimits(t *testing.T) {
 		`{"RecordingStorageSize": 9007199254740993}`,
 		`{"RecordingRetention": -1}`,
 		`{"RecordingRetention": ` + strconv.Itoa(int(MaxRecordingRetention/time.Hour)+1) + `}`,
-		`{"DerivedMediaTTL": -1}`,
-		`{"DerivedMediaTTL": -2}`,
-		`{"DerivedMediaTTL": ` + strconv.Itoa(int(MaxDerivedMediaTTL/time.Minute)+1) + `}`,
 	} {
 		if err := os.WriteFile(filepath.Join(dir, DefaultConfigFile), []byte(body), 0o600); err != nil {
 			t.Fatal(err)
@@ -230,33 +227,19 @@ func TestLoadRecordingStorageLimits(t *testing.T) {
 		}
 	}
 
-	if err := os.WriteFile(filepath.Join(dir, DefaultConfigFile), []byte(`{"DerivedMediaTTL": 0}`), 0o600); err != nil {
+	const body = `{"RecordingStorageSize": 6000, "RecordingRetention": 48}`
+	if err := os.WriteFile(filepath.Join(dir, DefaultConfigFile), []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err := Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.DerivedMediaTTL != 0 {
-		t.Fatalf("disabled derived TTL: got %v, want 0", cfg.DerivedMediaTTL)
+	if cfg.RecordingStorageSize != 6000<<20 || cfg.RecordingRetention != 48*time.Hour {
+		t.Fatalf("got %d bytes, %v retention", cfg.RecordingStorageSize, cfg.RecordingRetention)
 	}
 
-	const body = `{"RecordingStorageSize": 6000, "RecordingRetention": 48, "DerivedMediaTTL": 60}`
-	if err := os.WriteFile(filepath.Join(dir, DefaultConfigFile), []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	cfg, err = Load()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.RecordingStorageSize != 6000<<20 || cfg.RecordingRetention != 48*time.Hour ||
-		cfg.DerivedMediaTTL != time.Hour {
-		t.Fatalf("got %d bytes, %v retention, %v derived TTL",
-			cfg.RecordingStorageSize, cfg.RecordingRetention, cfg.DerivedMediaTTL)
-	}
-
-	maxConfig := `{"RecordingRetention": ` + strconv.Itoa(int(MaxRecordingRetention/time.Hour)) +
-		`, "DerivedMediaTTL": ` + strconv.Itoa(int(MaxDerivedMediaTTL/time.Minute)) + `}`
+	maxConfig := `{"RecordingRetention": ` + strconv.Itoa(int(MaxRecordingRetention/time.Hour)) + `}`
 	if err := os.WriteFile(filepath.Join(dir, DefaultConfigFile), []byte(maxConfig), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -264,8 +247,7 @@ func TestLoadRecordingStorageLimits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.RecordingRetention != MaxRecordingRetention || cfg.DerivedMediaTTL != MaxDerivedMediaTTL {
-		t.Fatalf("maximum durations: got %v retention, %v derived TTL, want %v and %v",
-			cfg.RecordingRetention, cfg.DerivedMediaTTL, MaxRecordingRetention, MaxDerivedMediaTTL)
+	if cfg.RecordingRetention != MaxRecordingRetention {
+		t.Fatalf("maximum retention: got %v, want %v", cfg.RecordingRetention, MaxRecordingRetention)
 	}
 }

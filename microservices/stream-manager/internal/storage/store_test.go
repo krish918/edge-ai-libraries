@@ -147,7 +147,7 @@ func TestListMedia(t *testing.T) {
 	}
 }
 
-func TestDeleteSourceMediaRetainsDerived(t *testing.T) {
+func TestDeleteMediaIfEligibleRemovesDerived(t *testing.T) {
 	ctx := context.Background()
 	_, media, dir := testStores(t)
 	rec := testRecording(t, media)
@@ -161,41 +161,63 @@ func TestDeleteSourceMediaRetainsDerived(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := media.DeleteSourceMedia(ctx, rec.RecordingPath); err != nil {
+	if _, _, err := media.PutMedia(ctx, rec.RecordingPath); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(source); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("source media remains: %v", err)
+	if deleted, err := media.DeleteMediaIfEligible(ctx, rec.RecordingPath, func() (bool, error) {
+		return false, nil
+	}); err != nil || deleted {
+		t.Fatalf("ineligible deletion: deleted=%v error=%v", deleted, err)
 	}
-	file, err := media.OpenDerivedByID(ctx, rec.RecordingID, "frame-0.jpeg")
+	if _, err := os.Stat(source); err != nil {
+		t.Fatalf("ineligible source removed: %v", err)
+	}
+	file, err := media.OpenDerived(ctx, rec.RecordingPath, "frame-0.jpeg")
 	if err != nil {
-		t.Fatalf("derived media was not retained: %v", err)
+		t.Fatalf("ineligible derived media removed: %v", err)
 	}
 	_ = file.Close()
-	if media.UsedBytes() != int64(len("derived")) {
-		t.Fatalf("used bytes = %d, want retained derived bytes", media.UsedBytes())
+	if deleted, err := media.DeleteMediaIfEligible(ctx, rec.RecordingPath, alwaysEligible); err != nil || !deleted {
+		t.Fatalf("eligible deletion: deleted=%v error=%v", deleted, err)
+	}
+	if _, err := os.Stat(filepath.Dir(source)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("recording directory remains: %v", err)
+	}
+	if _, err := media.OpenDerived(ctx, rec.RecordingPath, "frame-0.jpeg"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("derived media remains: %v", err)
+	}
+	if media.UsedBytes() != 0 {
+		t.Fatalf("used bytes = %d, want zero", media.UsedBytes())
+	}
+	if deleted, err := media.DeleteMediaIfEligible(ctx, rec.RecordingPath, alwaysEligible); err != nil || !deleted {
+		t.Fatalf("repeated deletion: deleted=%v error=%v", deleted, err)
+	}
+}
+
+func TestListMediaIncludesDerivedOnlyDirectories(t *testing.T) {
+	ctx := context.Background()
+	_, media, dir := testStores(t)
+	rec := testRecording(t, media)
+	if _, _, err := media.PutDerived(ctx, rec.RecordingPath, "frame-0.jpeg", func(path string) error {
+		return os.WriteFile(path, []byte("derived"), 0o600)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(dir, rec.RecordingID, "media.ts")); err != nil && !errors.Is(err, os.ErrNotExist) {
+		t.Fatal(err)
 	}
 	listed, err := media.ListMedia(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := listed[rec.RecordingID]; ok {
-		t.Fatal("source-less recording is listed for orphan cleanup")
+	if listed[rec.RecordingID] != rec.RecordingPath {
+		t.Fatal("derived-only directory was not listed for orphan cleanup")
 	}
-
-	empty := testRecording(t, media)
-	emptySource := filepath.Join(dir, empty.RecordingID, "media.ts")
-	if err := os.WriteFile(emptySource, []byte("source"), 0o600); err != nil {
+	if err := media.DeleteMedia(ctx, rec.RecordingPath); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Mkdir(filepath.Join(dir, empty.RecordingID, derivedDir), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := media.DeleteSourceMedia(ctx, empty.RecordingPath); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(filepath.Join(dir, empty.RecordingID)); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("empty derived directory was retained: %v", err)
+	if media.UsedBytes() != 0 {
+		t.Fatalf("orphan media is still charged: %d", media.UsedBytes())
 	}
 }
 

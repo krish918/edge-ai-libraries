@@ -149,6 +149,11 @@ func testPublisherAt(t *testing.T, codec string, sendNTP bool, baseNTP time.Time
 func testPublisherWithStop(t *testing.T, codec string, sendNTP bool, baseNTP time.Time) (string, time.Time, func()) {
 	t.Helper()
 	packets, adapter := videoFixture(t, codec)
+	return testPublisherPackets(t, packets, adapter, sendNTP, baseNTP)
+}
+
+func testPublisherPackets(t *testing.T, packets []fixturePacket, adapter *videoCodec, sendNTP bool, baseNTP time.Time) (string, time.Time, func()) {
+	t.Helper()
 	if _, _, err := adapter.prepare(packets[0].au, false); err != nil {
 		t.Fatal(err)
 	}
@@ -360,6 +365,73 @@ func TestRTSPMissingNTP(t *testing.T) {
 	files, err := os.ReadDir(buffer.root.Name())
 	if err != nil || len(files) != 0 {
 		t.Fatalf("missing-NTP failure left files: %v %v", files, err)
+	}
+}
+
+func TestRTSPIngestPreservesSourceTimeBase(t *testing.T) {
+	if testing.Short() {
+		t.Skip("real RTSP/FFmpeg integration")
+	}
+	packets, adapter := videoFixture(t, "h264")
+	origin := packets[0].PTS
+	for i := range packets {
+		offset := (packets[i].PTS - origin) / videoClockRate * 3
+		packets[i].PTS -= offset
+		packets[i].DTS -= offset
+	}
+	source, _, _ := testPublisherPackets(t, packets, adapter, true,
+		time.Date(2026, 2, 3, 4, 5, 6, 0, time.UTC))
+	service := testService(t, 10)
+	id, err := service.CreateBuffer(context.Background(), source, "camera-clock-drift", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		snapshot, err := service.GetStream(context.Background(), id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if snapshot.State == "failed" {
+			t.Fatal("ingestion rejected source timestamps outside the frame-rate grid")
+		}
+		if len(snapshot.Slices) >= 3 {
+			offGrid := false
+			for i, slice := range snapshot.Slices {
+				if i == 0 {
+					// The first MPEG-TS segment can shift negative B-frame DTS.
+					continue
+				}
+				output, err := exec.Command("ffprobe", "-v", "error", "-select_streams", "v:0",
+					"-show_packets", "-show_entries", "packet=pts", "-of", "json", slice.Path).Output()
+				if err != nil {
+					t.Fatal(err)
+				}
+				var probe struct {
+					Packets []struct {
+						PTS int `json:"pts"`
+					} `json:"packets"`
+				}
+				if err := json.Unmarshal(output, &probe); err != nil {
+					t.Fatal(err)
+				}
+				if len(probe.Packets) == 0 {
+					t.Fatal("stored segment has no video packets")
+				}
+				if probe.Packets[0].PTS != slice.PTSStart {
+					t.Fatalf("stored first packet does not match source PTS %d: %s", slice.PTSStart, output)
+				}
+				offGrid = offGrid || slice.PTSStart%9000 != 0
+			}
+			if !offGrid {
+				t.Fatal("fixture did not exercise timestamps outside the 10 fps grid")
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no usable slices: %+v", snapshot)
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }
 

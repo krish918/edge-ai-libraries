@@ -33,7 +33,7 @@ var (
 	ErrFrameNotFound  = errors.New("no frame sits at the requested time")
 	// ErrBeyondSearchLimit means the frame or its keyframe is farther than SearchLimit from the requested time.
 	ErrBeyondSearchLimit = errors.New("no decodable frame within the search limit")
-	ErrMediaNotFound     = errors.New("media not found or expired")
+	ErrMediaNotFound     = errors.New("media not found")
 	ErrBusy              = errors.New("extraction capacity reached")
 	ErrExtraction        = errors.New("media extraction failed")
 )
@@ -69,16 +69,11 @@ type Service struct {
 	ffprobe  string
 	slots    chan struct{}
 	now      func() time.Time
-	// derivedTTL is how long a cut frame or clip stays available.
-	derivedTTL time.Duration
 }
 
 var _ Retriever = (*Service)(nil)
 
-func NewService(metadata storage.MetadataHandler, media storage.MediaHandler, derivedTTL time.Duration) (*Service, error) {
-	if derivedTTL < 0 {
-		return nil, fmt.Errorf("%w: derived media TTL cannot be negative", ErrInvalidRequest)
-	}
+func NewService(metadata storage.MetadataHandler, media storage.MediaHandler) (*Service, error) {
 	ffmpeg, err := exec.LookPath("ffmpeg")
 	if err != nil {
 		return nil, fmt.Errorf("find FFmpeg: %w", err)
@@ -89,7 +84,7 @@ func NewService(metadata storage.MetadataHandler, media storage.MediaHandler, de
 	}
 	return &Service{
 		metadata: metadata, media: media, ffmpeg: ffmpeg, ffprobe: ffprobe,
-		slots: make(chan struct{}, maxConcurrentExtractions), now: time.Now, derivedTTL: derivedTTL,
+		slots: make(chan struct{}, maxConcurrentExtractions), now: time.Now,
 	}, nil
 }
 
@@ -127,7 +122,7 @@ func (s *Service) Frame(ctx context.Context, id string, ts time.Time, format, ma
 		return Media{}, ErrFrameNotFound
 	}
 	name := fmt.Sprintf("frame-%d.%s", frameTS.Sub(rec.StartTS).Nanoseconds(), format)
-	path, mtime, err := s.derive(ctx, rec, tl, name, func(dst string) []string {
+	path, _, err := s.derive(ctx, rec, tl, name, func(dst string) []string {
 		codec := []string{"-c:v", "mjpeg", "-q:v", "2"}
 		if format == "png" {
 			codec = []string{"-c:v", "png"}
@@ -143,7 +138,8 @@ func (s *Service) Frame(ctx context.Context, id string, ts time.Time, format, ma
 	return Media{
 		Result: model.MediaResult{
 			RecordingID: rec.RecordingID, SensorID: rec.SensorID,
-			RequestedStartTS: ts.UTC(), StartTS: frameTS.UTC(), ExpiryTS: s.expiry(mtime),
+			RequestedStartTS: ts.UTC(), StartTS: frameTS.UTC(),
+			ExpiryTS: rec.ExpiryTS,
 		},
 		Name: name, Path: path, ExactMatch: exact,
 	}, nil
@@ -178,7 +174,7 @@ func (s *Service) Clip(ctx context.Context, id string, start time.Time, duration
 	}
 	clipStart := tl.wall(keyframe.PTS)
 	name := fmt.Sprintf("clip-%d-%d.mp4", clipStart.Sub(rec.StartTS).Nanoseconds(), end.Sub(rec.StartTS).Nanoseconds())
-	path, mtime, err := s.derive(ctx, rec, tl, name, func(dst string) []string {
+	path, _, err := s.derive(ctx, rec, tl, name, func(dst string) []string {
 		seek, length := tl.cut(keyframe.PTS, end)
 		return []string{"-ss", seek, "-i", tl.path, "-t", length, "-map", "0:v:0", "-c", "copy",
 			"-movflags", "+faststart", "-f", "mp4", dst}
@@ -191,14 +187,19 @@ func (s *Service) Clip(ctx context.Context, id string, start time.Time, duration
 		Result: model.MediaResult{
 			RecordingID: rec.RecordingID, SensorID: rec.SensorID,
 			RequestedStartTS: start.UTC(), RequestedEndTS: &requestedEnd,
-			StartTS: clipStart.UTC(), EndTS: &clipEnd, ExpiryTS: s.expiry(mtime),
+			StartTS: clipStart.UTC(), EndTS: &clipEnd,
+			ExpiryTS: rec.ExpiryTS,
 		},
 		Name: name, Path: path, ExactMatch: clipStart.Equal(start),
 	}, nil
 }
 
-// OpenMedia opens a frame or clip cut earlier, unless its own TTL has expired.
+// OpenMedia serves derived media until its recording expires or is deleted.
 func (s *Service) OpenMedia(ctx context.Context, id, name string) (*os.File, MediaFile, error) {
+	rec, err := s.recording(ctx, id)
+	if err != nil {
+		return nil, MediaFile{}, err
+	}
 	file, err := s.media.OpenDerivedByID(ctx, id, name)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, MediaFile{}, ErrMediaNotFound
@@ -206,16 +207,8 @@ func (s *Service) OpenMedia(ctx context.Context, id, name string) (*os.File, Med
 	if err != nil {
 		return nil, MediaFile{}, err
 	}
-	info, err := file.Stat()
-	if err != nil {
-		return nil, MediaFile{}, errors.Join(err, file.Close())
-	}
-	expiryTS := s.expiry(info.ModTime())
-	if expiryTS != nil && !s.now().Before(*expiryTS) {
-		return nil, MediaFile{}, errors.Join(ErrMediaNotFound, file.Close())
-	}
 	contentType := contentTypes[filepath.Ext(name)[1:]]
-	return file, MediaFile{ContentType: contentType, ExpiryTS: expiryTS}, nil
+	return file, MediaFile{ContentType: contentType, ExpiryTS: rec.ExpiryTS}, nil
 }
 
 // recording returns a recording that has not expired.
@@ -277,7 +270,7 @@ func (s *Service) openTimeline(ctx context.Context, rec model.Recording) (*timel
 	return tl, release, nil
 }
 
-// derive returns the cached file called name while its TTL holds, otherwise
+// derive returns the cached file called name, otherwise
 // cuts it again with the FFmpeg arguments built for a destination path.
 func (s *Service) derive(ctx context.Context, rec model.Recording, tl *timeline, name string, args func(dst string) []string) (string, time.Time, error) {
 	path, mtime, err := s.cachedDerived(ctx, rec, name)
@@ -294,7 +287,7 @@ func (s *Service) derive(ctx context.Context, rec model.Recording, tl *timeline,
 }
 
 // cachedDerived returns the path and modification time of the file called
-// name, or an empty path when it is missing or older than derivedTTL.
+// name, or an empty path when it is missing.
 func (s *Service) cachedDerived(ctx context.Context, rec model.Recording, name string) (string, time.Time, error) {
 	file, err := s.media.OpenDerived(ctx, rec.RecordingPath, name)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -307,25 +300,12 @@ func (s *Service) cachedDerived(ctx context.Context, rec model.Recording, name s
 	if err := errors.Join(err, file.Close()); err != nil {
 		return "", time.Time{}, err
 	}
-	if s.derivedTTL > 0 && !s.now().Before(info.ModTime().Add(s.derivedTTL)) {
-		return "", time.Time{}, nil
-	}
 	return file.Name(), info.ModTime(), nil
 }
 
 // ffmpegArgs prefixes the shared FFmpeg flags.
 func ffmpegArgs(args []string) []string {
 	return append([]string{"-hide_banner", "-loglevel", "error", "-nostdin", "-y"}, args...)
-}
-
-// expiry is the optional TTL of a derived file.
-func (s *Service) expiry(mtime time.Time) *time.Time {
-	if s.derivedTTL == 0 {
-		return nil
-	}
-	expiryTS := mtime.Add(s.derivedTTL)
-	expiryTS = expiryTS.UTC()
-	return &expiryTS
 }
 
 func absDuration(d time.Duration) time.Duration {
