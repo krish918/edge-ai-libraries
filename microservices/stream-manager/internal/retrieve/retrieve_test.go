@@ -11,6 +11,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"image"
+	_ "image/jpeg"
+	_ "image/png"
 	"io"
 	"os"
 	"os/exec"
@@ -221,6 +224,17 @@ func TestFrame(t *testing.T) {
 					if !media.Result.RequestedStartTS.Equal(tc.ts) || media.Result.EndTS != nil ||
 						media.Result.RequestedEndTS != nil {
 						t.Fatalf("unexpected result %+v", media.Result)
+					}
+					file, err := os.Open(media.Path)
+					if err != nil {
+						t.Fatal(err)
+					}
+					_, format, decodeErr := image.DecodeConfig(file)
+					if err := file.Close(); err != nil {
+						t.Fatal(err)
+					}
+					if decodeErr != nil || format != tc.format {
+						t.Fatalf("image format %q, want %q: %v", format, tc.format, decodeErr)
 					}
 					if tc.format == "png" {
 						if got, want := pixels(t, media.Path, ""), referenceFrame(t, env.media, tc.want); got != want {

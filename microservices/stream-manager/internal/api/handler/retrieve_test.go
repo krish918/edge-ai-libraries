@@ -144,18 +144,24 @@ func TestRetrieveNegotiation(t *testing.T) {
 	}{
 		{"frame default JSON", frame, "", http.StatusOK, "application/json"},
 		{"frame any", frame, "*/*", http.StatusOK, "application/json"},
+		{"frame excludes all response types", frame, "*/*;q=0", http.StatusNotAcceptable, ""},
 		{"frame JSON", frame, "application/json", http.StatusOK, "application/json"},
+		{"frame JSON explicit jpeg link", frame + "&format=jpeg", "application/json", http.StatusOK, "application/json"},
 		{"frame jpeg", frame, "image/jpeg", http.StatusOK, "image/jpeg"},
+		{"frame explicit jpeg", frame + "&format=jpeg", "image/jpeg", http.StatusOK, "image/jpeg"},
 		{"frame png from Accept", frame, "image/png", http.StatusOK, "image/png"},
+		{"frame explicit png", frame + "&format=png", "image/png", http.StatusOK, "image/png"},
 		{"frame JSON png link", frame + "&format=png", "application/json", http.StatusOK, "application/json"},
 		{"frame image wildcard", frame + "&format=png", "image/*", http.StatusOK, "image/png"},
 		{"frame list follows supported response order", frame, "image/png, image/jpeg", http.StatusOK, "image/jpeg"},
 		{"frame wrong image type", frame + "&format=png", "image/jpeg", http.StatusNotAcceptable, ""},
+		{"frame png conflicts with jpeg format", frame + "&format=jpeg", "image/png", http.StatusNotAcceptable, ""},
 		{"frame video", frame, "video/mp4", http.StatusNotAcceptable, ""},
 		{"clip default JSON", clip, "", http.StatusOK, "application/json"},
 		{"clip mp4", clip, "video/mp4", http.StatusOK, "video/mp4"},
 		{"clip list selects JSON", clip, "application/json, video/mp4", http.StatusOK, "application/json"},
 		{"clip image", clip, "image/jpeg", http.StatusNotAcceptable, ""},
+		{"clip excludes all response types", "/v1/retrieve/" + testRecordingID + "/clip?start_ts=2026-06-15T14:12:01.5Z&duration=3", "*/*;q=0", http.StatusNotAcceptable, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -168,6 +174,9 @@ func TestRetrieveNegotiation(t *testing.T) {
 				t.Fatalf("missing Vary: Accept: %v", rec.Header())
 			}
 			if tc.status == http.StatusNotAcceptable {
+				if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, "application/json") {
+					t.Fatalf("Content-Type %q, want application/json", got)
+				}
 				if code := errorCode(t, rec); code != "not_acceptable" || f.calls != 0 {
 					t.Fatalf("code %q after %d extractions; want not_acceptable before extracting", code, f.calls)
 				}
@@ -196,8 +205,14 @@ func TestRetrieveNegotiation(t *testing.T) {
 				if rec.Header().Get("Cache-Control") != "no-store" || !strings.HasPrefix(result.URL, "/v1/media/"+testRecordingID+"/") {
 					t.Fatalf("unexpected JSON reply %v %+v", rec.Header(), result)
 				}
-				if tc.name == "frame JSON png link" && !strings.HasSuffix(result.URL, ".png") {
-					t.Fatalf("JSON link did not select PNG: %+v", result)
+				if strings.Contains(tc.target, "/frame?") {
+					suffix := ".jpeg"
+					if strings.Contains(tc.target, "format=png") {
+						suffix = ".png"
+					}
+					if !strings.HasSuffix(result.URL, suffix) {
+						t.Fatalf("JSON link %q, want suffix %q", result.URL, suffix)
+					}
 				}
 				return
 			}
